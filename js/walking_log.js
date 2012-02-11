@@ -1,27 +1,3 @@
-/*
-  
-Copyright (c) 2010 Dave Carlile (email: david@willowridgesoftware.com)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
-*/
-
 var wrsWalkingLog =
 {
   initialize: function()
@@ -46,7 +22,7 @@ var wrsWalkingLog =
 
   debugMsg: function(message)
   {
-    jQuery('#test_message').append(message + '<br />');
+    jQuery('#trace_message').append(message + '<br />');
   },
   
   extractId: function(id)
@@ -69,14 +45,16 @@ var wrsWalkingLog =
 
   parseNumber: function(value)
   {
-    var vs = value + '';
+    var vs = value + '';  // force to string type
     
     // change decimal point to a .
     vs = vs.replace(wrsWalkingLogSettings.decimalPoint, '.');
     
     var result = parseFloat(vs);
     if (isNaN(result))
+    {
       result = 0.0;
+    }
     
     return result;
   },
@@ -85,7 +63,7 @@ var wrsWalkingLog =
   // this should only be called with a number formatted with "." for decimal point and "," for grouping
   formatNumber: function(value, places)
   {
-    var vs = value.toFixed(places) + '';
+    var vs = value.toFixed(places) + '';  // force to string type
     
     // remove grouping
     vs = vs.replace(new RegExp(',', 'g'), '');
@@ -523,6 +501,9 @@ var wrsWalkingLog =
     {
       item.show();
     }
+
+    // hide edit/delete links    
+    jQuery('.wrswl-rowactions').stop(true, true).hide();
   },
 
 
@@ -780,8 +761,9 @@ var wrsWalkingLog =
     // remove the "new log entry" button
     jQuery('#wrswl-add-log-top, #wrswl-add-log-bottom').remove();
 
-    // remove all events
-    jQuery('#wrswl-monthly-data tr').unbind();
+    // remove all events - have to do tr events, and descendents separately - seems like that used to
+    // work with just the first selector in previous versions of jQuery - should test that some day
+    jQuery('#wrswl-monthly-data tr, #wrswl-monthly-data tr *').unbind();
   },
 
 
@@ -809,7 +791,7 @@ var wrsWalkingLog =
     var thisInstance = this;
     
     jQuery('#wrswl-monthly-data').html('<p><br />Loading...</p>').show();
-    
+
     // we're no longer editing a row
     this.editingRow = false;
     
@@ -847,14 +829,14 @@ var wrsWalkingLog =
           thisInstance.debugMsg(data);
           
           // some very poor error handling
-          jQuery('#wrswl-monthly-data').html('Someting went wrong. Refresh the page and try again.').fadeIn('fast');
+          jQuery('#wrswl-monthly-data').html('Something went wrong. Refresh the page and try again.').fadeIn('fast');
         }
       },
         
       failure: function()
       {
         // some very poor error handling
-        jQuery('#wrswl-monthly-data').html('Someting went wrong. Refresh the page and try again.').fadeIn('fast');
+        jQuery('#wrswl-monthly-data').html('Something went wrong. Refresh the page and try again.').fadeIn('fast');
       }
     });
   },

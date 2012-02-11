@@ -1,10 +1,10 @@
 === Plugin Name ===
-Contributors: crappycodingguy
-Donate link: http://www.willowridgesoftware.com/blog/products/walking-log-wordpress-plugin/
+Contributors: CrappyCodingGuy
+Donate link: 
 Tags: exercise, walking, hiking
 Requires at least: 3.0
-Tested up to: 3.0
-Stable tag: 1.0
+Tested up to: 3.3.1
+Stable tag: 1.1
 
 Exercise log for tracking time and distance based exercise, such as walking or running.
 
@@ -13,7 +13,8 @@ Exercise log for tracking time and distance based exercise, such as walking or r
 Walking Log is a WordPress plugin for tracking time and distance based exercise, such as walking or hiking. 
 The plugin allows you to track date, exercise time in minutes, distance, type (e.g. walking), and location.
 
-The log is view only for visitors, and editable for users with "manage options" permissions.
+The log can be viewed and edited within the admin pages, or it can be placed in a post or page with various
+viewing permissions and editing permissions.
 
 == Installation ==
 
@@ -32,28 +33,44 @@ The log is view only for visitors, and editable for users with "manage options" 
 
 Add new exercise types and locations using the Walking Log/Maintenance settings admin menu.
 
+= Does the plugin clean up after itself when it's deleted? =
 
+Yes, the plugin cleans up all options and database tables it creates when running as a single blog.
+When running in a multisite network it will not delete tables since this could be a very time consuming
+operation on a large network. This could also be a dangerous operation since there is a risk of
+accidentally deleting a lot of data.
 
 == Changelog ==
 
+= 1.1 =
+* Multisite network is now supported.
+* Added log viewing and editing from within admin pages.
+* Style sheet improvements so the default styles work better with different themes/font sizes - might still require tweaking on themes with unusual font sizes.
+* Added privacy settings to provide some flexibility in who can see the log.
+* Enabled deleting types and locations that are no longer used.
+* Fixed several PHP notices and other bugs.
+* The uninstall page provides info about what needs backed up before deleting, but all uninstall functionality is now handled when deleting the plugin from plugin admin.
+
+
 = 1.0 =
 * Initial version.
-
 
 == Upgrade Notice ==
 
+= 1.1 =
+Log viewing and editing from admin pages, multisite now supported, new privacy settings, style sheet improvements, bug fixes.
+
 = 1.0 =
-* Initial version.
+Initial version.
 
 == Screenshots ==
 
 1. Sample log imbedded in a page
 2. Add exercise types and locations
-3. Uninstall page removes all options and database tables created by the plugin
 
 == License ==
 
-Copyright (c) 2010 Dave Carlile (email: david@willowridgesoftware.com)
+Copyright (c) 2012 Dave Carlile (email: david@willowridgesoftware.com)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

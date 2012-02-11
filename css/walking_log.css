@@ -1,9 +1,61 @@
+/*
+  
+Copyright (c) 2012 Dave Carlile (email: david@willowridgesoftware.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+*/
+
 #wrswl-monthly-data
 {
   margin: 10px;
   margin-bottom: 20px;
 }
 
+#wrswl-edit-log-top, #wrswl-edit-log-bottom, #wrswl-add-log-top, #wrswl-add-log-bottom
+{
+  padding:3px;
+  margin:3px;
+}
+
+#wrswl-monthly-data-table 
+{
+  border: 1px solid #a0a0a0;
+  border-collapse:collapse;
+  table-layout: fixed;
+  font-size: small;
+  color: #303030;
+}
+ 
+#wrswl-monthly-data-table th
+{
+  border: 1px solid #a0a0a0;
+  padding: 0.35em;
+  color: #303030;
+}
+
+#wrswl-monthly-data-table td
+{
+  border: 1px solid #a0a0a0;
+  padding: 6px;
+  vertical-align: top;
+}
 
 
 #wrswl-uninstall-confirmation-container
@@ -65,7 +117,7 @@
 
 .wrswl-list-edit td
 {
-  padding: 2px;
+  padding: 0.5em;
   border: 0px solid;
 }
 
@@ -80,89 +132,132 @@
 }
 
 
+/***** table columns, sizes - these have to be the first row so table-layout:fixed works *****/
+th.wrswl-date-row
+{
+  width: 65px;
+  padding: 0px;
+}
+
+th.wrswl-time-row
+{
+  width: 79px;
+  padding: 0px;
+}
+
+th.wrswl-distance-row
+{
+  width: 65px;
+  padding: 0px;
+}
+
+th.wrswl-type-row
+{
+  width:115px;
+  padding: 0px;
+}
+
+th.wrswl-location-row
+{
+  width:190px;
+  padding: 0px;
+}
+
+
+/***** table columns, normal display *****/
+
 td.wrswl-date-row
 {
-  width: 60px;
+  margin: 0px;
+  padding: 0px;
 }
 
 td.wrswl-time-row
 {
   text-align: right;
-  width: 60px;
+  margin: 0px;
+  padding: 0px;
 }
 
 td.wrswl-distance-row
 {
   text-align: right;
-  width: 60px;
+  margin: 0px;
+  padding: 0px;
 }
 
 td.wrswl-type-row
 {
-  width:110px;
+  margin: 0px;
+  padding: 0px;
 }
 
 td.wrswl-location-row
 {
-  width:180px;
+  margin: 0px;
+  padding: 0px;
 }
 
 
+/***** table columns, edit mode *****/
+
 td.wrswl-date-edit
 {
-  padding-left: 6px;
-  padding-top: 2px;
+  text-align: center;
 }
 
 select.wrswl-date-edit
 {
-  width: 60px;
+  width: 54px;
+  padding: 2px;
+  margin: 0px;
 }
 
 td.wrswl-time-edit
 {
-  padding-left: 8px;
-  padding-top: 4px;
+  text-align: center;
 }
 
 input.wrswl-time-edit
 {
-  width: 58px;
+  width: 68px;
+  padding: 2px;
+  margin: 0px;
 }
 
 td.wrswl-distance-edit
 {
-  padding-left: 8px;
-  padding-top: 4px;
+  text-align: center;
 }
 
 input.wrswl-distance-edit
 {
-  width: 58px;
+  width: 54px;
+  padding: 2px;
+  margin: 0px;
 }
 
 
 td.wrswl-type-edit
 {
-  padding-left: 6px;
-  padding-top: 2px;
+  text-align: center;
 }
 
 select.wrswl-type-edit
 {
-  width: 110px;
+  width: 104px;
+  padding: 2px;
+  margin: 0px;
 }
 
 td.wrswl-location-edit
 {
-  padding-left: 6px;
-  padding-top: 2px;
+  text-align: center;
 }
 
 select.wrswl-location-edit
 {
-  width: 180px;
+  width: 181px;
+  padding: 2px;
+  margin: 0px;
 }
-
-
-
