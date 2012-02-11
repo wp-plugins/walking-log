@@ -3,9 +3,9 @@
 /*
 
 Plugin Name: Walking Log
-Plugin URI: http://www.willowridgesoftware.com/blog/products/walking-log-wordpress-plugin/
+Plugin URI: http://www.willowridgesoftware.com/apps.php
 Description: Exercise log for tracking time and distance based exercise, such as walking or running.
-Version: 1.0
+Version: 1.1
 Author: Dave Carlile
 Author URI: http://www.crappycoding.com
 License: MIT
@@ -15,7 +15,7 @@ License: MIT
 
 /*
   
-Copyright (c) 2010 Dave Carlile (email: david@willowridgesoftware.com)
+Copyright (c) 2012 Dave Carlile (email: david@willowridgesoftware.com)
 
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -36,42 +36,64 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-
 */
-
-
 
 if (! class_exists('wrsWalkingLogPlugin'))
 {
   class wrsWalkingLogPlugin
   {
-    var $dbVersion = '1.1';
+    var $Admin;
+    var $dbVersion = '1.2';
     var $ExerciseTypeTableName;
     var $ExerciseLocationTableName;
     var $ExerciseLogTableName;
     var $Options;
     var $TimeSeparator;
     var $UninstallRequest;
+    var $IsMultiSite;
+    var $IsNetworkWide;
+    var $CurrentUserIsAuthor;
+    var $CurrentUserCanEditLog;
 
+    
     function wrsWalkingLogPlugin()
     {
+      $this->IsMultiSite = function_exists('is_multisite') && is_multisite();
+      $this->IsNetworkWide = isset($_GET['networkwide']) && $_GET['networkwide'] == 1;
       $this->TimeSeparator = ':';
       $this->InitializeTableNames();
       $this->InitializeSettings();
 
-
       // hooks
       register_activation_hook(__FILE__, array(&$this, 'ActivatePlugin'));
       register_deactivation_hook(__FILE__, array(&$this, 'DeactivatePlugin'));
-      
+
       // admin actions
       if (is_admin())
       {
-        add_action('admin_menu', array(&$this, 'AdminMenu'));
-        add_action('admin_init', array(&$this, 'AdminInit'));
+        require_once('walking_log_admin.php');
+        $this->Admin = new wrsWalkingLogAdmin($this);
+        
+        if ($this->IsMultiSite)
+        {
+          add_action('network_admin_menu', array(&$this->Admin, 'NetworkAdminMenu'));
+        }
+        
+        add_action('admin_menu', array(&$this->Admin, 'AdminMenu'));
+        add_action('admin_init', array(&$this->Admin, 'AdminInit'));
         add_action('admin_print_styles', array(&$this, 'PrintStyles'));
       }
 
+      
+      // multi-site event actions
+      if ($this->IsMultiSite)
+      {
+        add_action('wpmu_new_blog', array(&$this, 'NewBlog'), 10, 6);
+        //add_action('wpmu_delete_blog', array(&$this, 'DeleteBlog'), 10, 1);
+        
+        add_filter('wpmu_drop_tables', array(&$this, 'DropTablesForBlog'));
+        
+      }
 
       // event actions
       add_action('plugins_loaded', array(&$this, 'PluginsLoaded'));
@@ -92,19 +114,30 @@ if (! class_exists('wrsWalkingLogPlugin'))
     {
       $this->Options = get_option('wrswl_settings');
 
-      if (!$this->Options['wrswl_settings_time_format'])
+      if (!isset($this->Options['wrswl_settings_time_format']))
         $this->Options['wrswl_settings_time_format'] = 'minutes';
 
-      if (!$this->Options['wrswl_settings_distance_format'])
+      if (!isset($this->Options['wrswl_settings_distance_format']))
         $this->Options['wrswl_settings_distance_format'] = 'miles';
         
-
+      if (!isset($this->Options['wrswl_settings_privacy']))
+        $this->Options['wrswl_settings_privacy'] = 'public';
+        
       // uninstall request      
       $this->UninstallRequest = get_option('wrswl_settings_uninstall');
       if (! $this->UninstallRequest)
         $this->UninstallRequest = 'no';
     }
 
+
+    function RefreshUserInfo()
+    {    
+      global $current_user;
+      get_currentuserinfo();
+      $this->CurrentUserIsAuthor = get_the_author() == $current_user->display_name;
+      $this->CurrentUserCanEditLog = current_user_can('manage_options') || $this->CurrentUserIsAuthor;
+    }
+    
 
     function PluginsLoaded()
     {
@@ -152,7 +185,6 @@ if (! class_exists('wrsWalkingLogPlugin'))
       // load translation      
       load_plugin_textdomain('wrs_walking_log', null, basename(dirname(__FILE__)));      
 
- 
       // create walking log settings object
       $exercise_types = $this->GetExerciseTypes();
       $exercise_locations = $this->GetExerciseLocations();
@@ -240,6 +272,22 @@ if (! class_exists('wrsWalkingLogPlugin'))
     }
 
 
+    function DeleteExerciseType($id)
+    {
+      global $wpdb;
+      $sql = $wpdb->prepare("delete from $this->ExerciseTypeTableName where type_id = %d", $id);
+      $wpdb->query($sql);
+    }
+    
+    
+    function DeleteExerciseLocation($id)
+    {
+      global $wpdb;
+      $sql = $wpdb->prepare("delete from $this->ExerciseLocationTableName where location_id = %d", $id);
+      $wpdb->query($sql);
+    }
+    
+    
     function ToggleExerciseTypeVisibility($id)
     {
       global $wpdb;
@@ -325,6 +373,8 @@ if (! class_exists('wrsWalkingLogPlugin'))
     
     function CreateExerciseLogTable()
     {
+      global $wpdb;
+      
       $sql = "
         log_id int NOT NULL AUTO_INCREMENT,
         log_date date NOT NULL,
@@ -332,8 +382,9 @@ if (! class_exists('wrsWalkingLogPlugin'))
         distance float NOT NULL,
         type_id int NOT NULL,
         location_id int NOT NULL,
-        
-        UNIQUE KEY log_id (log_id)
+        UNIQUE KEY log_id (log_id),
+        KEY type_id (type_id),
+        KEY location_id (location_id)
       ";
       
       $this->CreateTable($this->ExerciseLogTableName, $sql);
@@ -377,9 +428,91 @@ if (! class_exists('wrsWalkingLogPlugin'))
       $wpdb->query($sql);
     }
 
+    
+    function UpdateExerciseLogTable_12()
+    {
+      global $wpdb;
+      
+      $sql = "
+        log_id int NOT NULL AUTO_INCREMENT,
+        log_date date NOT NULL,
+        elapsed_time float NOT NULL,
+        distance float NOT NULL,
+        type_id int NOT NULL,
+        location_id int NOT NULL,
+        UNIQUE KEY log_id (log_id),
+        KEY type_id (type_id),
+        KEY location_id (location_id)
+      ";
+      
+      $this->AlterTable($this->ExerciseLogTableName, $sql);
+    }
+    
+    
+    function SwitchBlog($blog_id)
+    {
+      switch_to_blog($blog_id);
+      $this->InitializeTableNames();
+    }
+    
+    
+    function RestoreBlog()
+    {
+      restore_current_blog();
+      $this->InitializeTableNames();
+    }
 
+    
+    function NewBlog($blog_id, $user_id, $domain, $path, $site_id, $meta)
+    {
+      $this->SwitchBlog($blog_id);
+      $this->ActivateForBlog();
+      $this->RestoreBlog();
+    }
+
+    
+    function DropTablesForBlog($tables)
+    {
+      global $wpdb;
+      
+      $this->DeactivateForBlog();
+      $this->InitializeTableNames();
+
+      // add our tables
+      $tables[] = $this->ExerciseTypeTableName;
+      $tables[] = $this->ExerciseLocationTableName;
+      $tables[] = $this->ExerciseLogTableName;
+
+      return $tables;
+    }
+    
+    
     function ActivatePlugin()
     {
+      global $wpdb;
+    
+      // if network wide activation then activate for all blogs, otherwise just for the currently active blog
+      if ($this->IsMultiSite && $this->IsNetworkWide)
+      {
+        $blogs = $wpdb->get_col($wpdb->prepare("select blog_id from $wpdb->blogs"));
+
+        foreach ($blogs as $blog_id)
+        {
+          $this->SwitchBlog($blog_id);
+          $this->ActivateForBlog();
+        }
+
+        $this->RestoreBlog();
+      }
+      else
+      {
+        $this->ActivateForBlog();
+      }
+    }
+	
+	
+    function ActivateForBlog()
+    {	
       // make sure the uninstall request option isn't around, in case we somehow got
       // deactivated without removing it
       delete_option("wrswl_settings_uninstall");
@@ -405,25 +538,92 @@ if (! class_exists('wrsWalkingLogPlugin'))
           $installed_ver = '1.1';
           update_option("wrswl_db_version", $installed_ver);
         }
+        
+        // 1.1 -> 1.2
+        if ($installed_ver == '1.1')
+        {
+          $this->UpdateExerciseLogTable_12();
+          $installed_ver = '1.2';
+          update_option("wrswl_db_version", $installed_ver);
+        }
       }
     }
 
 
     function DeactivatePlugin()
     {
+      global $wpdb;
+      
+      // if network wide activation then activate for all blogs, otherwise just for the currently active blog
+      if ($this->IsMultiSite && $this->IsNetworkWide)
+      {
+        $blogs = $wpdb->get_col($wpdb->prepare("select blog_id from $wpdb->blogs"));
+
+        foreach ($blogs as $blog_id)
+        {
+          $this->SwitchBlog($blog_id);
+          $this->DeactivateForBlog();
+        }
+
+        $this->RestoreBlog();
+      }
+      else
+      {
+        $this->DeactivateForBlog();
+      }
+    }
+	
+	
+    function DeactivateForBlog()
+    {
       // we want to leave this option until the plugin is actually deactivated, because we've already deleted
       // all of the other plugin fields and options
       delete_option("wrswl_settings_uninstall");
     }
+    
+    
+    function UninstallPlugin()
+    {
+      // flag that we've uninstalled        
+      update_option("wrswl_settings_uninstall", "uninstalled");
 
 
+      // remove things we registered
+      remove_shortcode('wrs_walking_log');
+      delete_option("wrswl_db_version");
+      delete_option("wrswl_settings");
+
+      
+      // unregister settings        
+      unregister_setting('wrswl_settings_group', 'wrswl_settings', array(&$this, 'ValidateSettings'));
+      unregister_setting('wrswl_settings_uninstall', 'wrswl_settings_uninstall', array(&$this, 'ValidateUninstallSettings'));
+
+      
+      // remove tables, note that this is only dropping the tables in the current blog
+      if (!$this->IsMultiSite)
+      {
+        $this->DropTable($this->ExerciseTypeTableName);
+        $this->DropTable($this->ExerciseLocationTableName);
+        $this->DropTable($this->ExerciseLogTableName);
+      }
+    }
+    
+    
     function ShowNoDisplayView()
     {
       echo '<p><em>>>> ';
-      _e('Walking Log only displays on pages and single post views', 'wrs_walking_log');
+      _e('Walking Log only displays on pages and single post views.', 'wrs_walking_log');
       echo ' <<<</em></p>';
     }
     
+
+    function ShowPrivateView()
+    {
+      echo '<p><em>>>> ';
+      _e('This Walking Log is private.', 'wrs_walking_log');
+      echo ' <<<</em></p>';
+    }
+
 
     // [wrs_walking_log view="main"]
     function HandleShortCodes($atts)
@@ -436,12 +636,31 @@ if (! class_exists('wrsWalkingLogPlugin'))
       $View = $view;
 
       // TODO : clean value
+
+      $this->RefreshUserInfo();
       
+      // never display if not a page or single post      
       if (!is_page() && !is_single())
-        $View = "no_display";
+        $View = 'no_display';
+        
+      // display private message if admin privacy level and user is not admin
+      else if ($this->Options['wrswl_settings_privacy'] == 'admin' && !current_user_can('manage_options'))
+        $View = 'private_display';
+        
+      // display private message if user level and no user logged in
+      else if ($this->Options['wrswl_settings_privacy'] == 'user' && !is_user_logged_in())
+        $View = 'private_display';
+        
+      // display private message if author level and user is not author
+      else if ($this->Options['wrswl_settings_privacy'] == 'author' && !$this->CurrentUserIsAuthor)
+        $View = 'private_display';
+
+        
 
       if ($View == 'main')
-        $this->ShowMainView();
+        $this->ShowMainView(false);
+      else if ($View == 'private_display')
+        $this->ShowPrivateView();
       else if ($View == 'no_display')
         $this->ShowNoDisplayView();
       else
@@ -457,7 +676,6 @@ if (! class_exists('wrsWalkingLogPlugin'))
     function InsertLog()
     {
       global $wpdb;
-
 
       $this->VerifyWritePermissions();
       $this->VerifyNonce();
@@ -528,7 +746,10 @@ if (! class_exists('wrsWalkingLogPlugin'))
 
     function VerifyWritePermissions()
     {
-      if (!current_user_can('manage_options'))
+      $this->RefreshUserInfo();
+      
+      if (!$this->CurrentUserCanEditLog)
+      //if (!current_user_can('manage_options') && !$this->CurrentUserIsAuthor)
         die('Request Failed');
     }
 
@@ -585,6 +806,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
       die();
     }
 
+    
     function NumberFormat($value, $decimals = 0)
     {
       // if we add the grouping characters there are potential editing issues we need to deal with,
@@ -663,23 +885,23 @@ if (! class_exists('wrsWalkingLogPlugin'))
 
       $results = $wpdb->get_results($sql);
                     
-      echo 'OK:<table name="wrswl-monthly-data-table" id="wrswl-monthly-data-table">';
+      echo 'OK:<table name="wrswl-monthly-data-table" id="wrswl-monthly-data-table" >';
       
       echo '    <tr>' . "\n";
       /* translators: Date the person exercised */
-      echo '      <th scope="col">' . __('Date', 'wrs_walking_log') . '</th>' . "\n";
+      echo '      <th scope="col" class="wrswl-date-row">' . __('Date', 'wrs_walking_log') . '</th>' . "\n";
 
       /* translators: The total amount of time the person exercised */
-      echo '      <th scope="col">' . __('Time', 'wrs_walking_log') . '</th>' . "\n";
+      echo '      <th scope="col" class="wrswl-time-row">' . __('Time', 'wrs_walking_log') . '</th>' . "\n";
 
       /* translators: The total distance the person walked */
-      echo '      <th scope="col">' . __('Distance', 'wrs_walking_log') . '</th>' . "\n";
+      echo '      <th scope="col" class="wrswl-distance-row">' . __('Distance', 'wrs_walking_log') . '</th>' . "\n";
 
       /* translators: The type of exercise */
-      echo '      <th scope="col">' . __('Type', 'wrs_walking_log') . '</th>' . "\n";
+      echo '      <th scope="col" class="wrswl-type-row">' . __('Type', 'wrs_walking_log') . '</th>' . "\n";
 
       /* translators: Where the exercise took place */
-      echo '      <th scope="col">' . __('Location', 'wrs_walking_log') . '</th>' . "\n";
+      echo '      <th scope="col" class="wrswl-location-row">' . __('Location', 'wrs_walking_log') . '</th>' . "\n";
 
       echo '    </tr>' . "\n";
   
@@ -737,7 +959,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
         if ($result != '[')
           $result .= ', ';
 
-        $result .= "{id:$row->type_id, name:'$row->name'}";
+        $result .= "{id:$row->type_id, name:" . json_encode($row->name) . "}";
       }
 
       $result .= ']';
@@ -760,7 +982,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
         if ($result != '[')
           $result .= ', ';
 
-        $result .= "{id:$row->location_id, name:'$row->name'}";
+        $result .= "{id:$row->location_id, name:" . json_encode($row->name) . "}";
       }
 
       $result .= ']';
@@ -781,8 +1003,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
       $row = $results[0];
 
       $minDate = strtotime($row->min_date);
-      $maxDate = strtotime($row->max_date);      
-
+      $maxDate = time(); // strtotime($row->max_date);      
 
       $minDate = strtotime(date_i18n("Y-m-1", $minDate) . " -3 months");
       $maxDate = strtotime(date_i18n("Y-m-1", $maxDate) . " +3 months");
@@ -810,13 +1031,18 @@ if (! class_exists('wrsWalkingLogPlugin'))
     }
 
 
-    function ShowMainView()
+    function ShowMainView($IsAdminPage)
     {
       $this->WriteNonce();
+      
+      // uncomment this to allow the javascript code to show trace messages during ajax calls
+      // echo "\n" . '<div id="trace_message"></div>' . "\n";
+      
       $this->WriteMonthSelect();
-
+      $this->RefreshUserInfo();
+      
       // add top edit button
-      if (current_user_can('manage_options'))
+      if ($this->CurrentUserCanEditLog)
       {
         echo '<input type="button" id="wrswl-edit-log-top" href="#" value="' . __('Edit Log', 'wrs_walking_log') . '" />';
       }
@@ -827,569 +1053,101 @@ if (! class_exists('wrsWalkingLogPlugin'))
 
 
       // add bottom edit button
-      if (current_user_can('manage_options'))
+      if ($this->CurrentUserCanEditLog)
       {
         echo '<div>';
         echo '  <div style="float:left"><input type="button" id="wrswl-edit-log-bottom" href="#" value="' . __('Edit Log', 'wrs_walking_log') . '" /></div>';
         
         $admin_url = admin_url('admin.php?page=wrs_walking_log_menu');
-        echo '  <div style="float:right"><a id="wrswl-settings-link" href="' . $admin_url . '">Settings</a></div>';
+        
+        if (!$IsAdminPage)
+        {
+          echo '  <div style="float:right"><a id="wrswl-settings-link" href="' . $admin_url . '">Settings</a></div>';
+        }
+        
         echo '</div>';
       }
-      
-      // echo '<div id="test_message"></div>';
     }
 
-
-    // admin functionality
-    function AdminMenu()
-    {
-      // general settings
-      add_menu_page(__('Walking Log', 'wrs_walking_log'),
-                    __('Walking Log', 'wrs_walking_log'),
-                    'manage_options',
-                    'wrs_walking_log_menu',
-                    array(&$this, 'WriteAdminPage'));
-                    
-      // types and locations editing
-      add_submenu_page('wrs_walking_log_menu',
-                       /* translators: General settings */
-                       __('General', 'wrs_walking_log'),
-                       __('General', 'wrs_walking_log'),
-                       'manage_options',
-                       'wrs_walking_log_menu',
-                       array(&$this, WriteAdminPage));
-
-
-      // types and locations editing
-      add_submenu_page('wrs_walking_log_menu',
-                       /* translators: Maintenance settings - add exercise types and locations */
-                       __('Maintenance', 'wrs_walking_log'),
-                       __('Maintenance', 'wrs_walking_log'),
-                       'manage_options',
-                       'wrs_walking_log_menu_maintenance',
-                       array(&$this, WriteAdminPage));
-
-      // uninstall
-      add_submenu_page('wrs_walking_log_menu',
-                       /* translators: Uninstall the plugin */
-                       __('Uninstall', 'wrs_walking_log'),
-                       __('Uninstall', 'wrs_walking_log'),
-                       'manage_options',
-                       'wrs_walking_log_menu_uninstall',
-                       array(&$this, WriteAdminPage));
-
-    }
-
-
-
-    function WriteAdminPage()
-    {
-      if ($this->UninstallRequest === "uninstalled")
-      {
-        $this->WriteAdminUninstalledPage();
-        return;
-      }
-      
-      switch ($_GET['page'])
-      {
-        case 'wrs_walking_log_menu_maintenance':
-          $this->WriteAdminMaintenancePage();
-          break;
-
-        case 'wrs_walking_log_menu_uninstall':
-          $this->WriteAdminUninstallPage();
-          break;
-
-        case 'wrs_walking_log_menu':
-        default:          
-          $this->WriteAdminGeneralPage();
-          break;
-          
-      }
-    }
-
-
-
-    function AdminInit()
-    {
-      register_setting('wrswl_settings_group', 'wrswl_settings', array(&$this, 'ValidateGeneralSettings'));
-      register_setting('wrswl_settings_uninstall', 'wrswl_settings_uninstall', array(&$this, 'ValidateUninstallSettings'));
-      //register_setting('wrswl_settings_maintenance', 'wrswl_settings_maintenance');
- 
-      
-      if ($_GET['page'] === 'wrs_walking_log_menu')
-      {
-        // usage
-        add_settings_section('wrswl_settings_usage', __('Usage', 'wrs_walking_log'), array(&$this, 'WriteUsageSettingsSection'), 'wrswl_walking_log');
-
-        // general settings
-        add_settings_section('wrswl_settings_general', __('General Settings', 'wrs_walking_log'), array(&$this, 'WriteGeneralSettingsSection'), 'wrswl_walking_log');
-        add_settings_field('wrswl_settings_time_format', __('Exercise Time Display Format', 'wrs_walking_log'), array(&$this, 'WriteSettingTimeFormat'), 'wrswl_walking_log', 'wrswl_settings_general');
-        add_settings_field('wrswl_settings_distance_format', __('Distance Display Format', 'wrs_walking_log'), array(&$this, 'WriteSettingDistanceFormat'), 'wrswl_walking_log', 'wrswl_settings_general');
-      }
-      
-      else if ($_GET['page'] === 'wrs_walking_log_menu_uninstall')
-      {
-        // uninstall
-        add_settings_section('wrswl_settings_uninstall', __('Uninstall Walking Log', 'wrs_walking_log'), array(&$this, 'WriteUninstallSettingsSection'), 'wrswl_walking_log');
-        add_settings_field('wrswl_settings_uninstall', '', array(&$this, 'WriteSettingUninstall'), 'wrswl_walking_log', 'wrswl_settings_uninstall');
-      }
-    }
-
-
-    function ValidateGeneralSettings($input)
-    {
-      // time format
-      $value = trim($input['wrswl_settings_time_format']);
-      if ($value !== 'minutes' /*&& $value !== 'hours'*/ && $value !== 'hh:mm:ss')
-        $value = 'minutes';
-
-      $this->Options['wrswl_settings_time_format'] = $value;
-
-
-      // date format
-      $value = trim($input['wrswl_settings_distance_format']);
-      if ($Value !== 'miles' && $value !== 'kilometers')
-        $value = 'miles';
-
-      $this->Options['wrswl_settings_distance_format'] = $value;
-
-      return $this->Options;
-    }
-
-    
-    function ValidateUninstallSettings($input)
-    {
-      // uninstall request
-      $value = $input;
-      
-      if ($value != 'no' && $value != 'uninstall' && $value != 'uninstalled')
-        $value = 'no';
-      
-      $this->UninstallRequest = $value;
-      
-      return $this->UninstallRequest;
-    }
-    
-
-    // usage settings
-    function WriteUsageSettingsSection()
-    {
-      echo '<div class="wrswl-settings-section">';
-      echo '<p>';
-      printf(__('To display the walking log you need to include this short code somewhere in a page: %s', 'wrs_walking_log'), '<strong>[wrs_walking_log view="main"]</strong>');
-      echo "</p>\n<p>";
-
-      printf(__("You must also add a custom field with a name of %s (along with any value) to each page where you add " .
-                "the short code. This is required so the plugin can load itself only on pages where it's needed.", 'wrs_walking_log'),
-             '<strong>wrs_walking_log</strong>');
-
-      echo "</p>\n";
-      echo "</div>\n";
-    }
-
-    
-    // general settings
-    function WriteGeneralSettingsSection()
-    {
-      echo '<div class="wrswl-settings-section">';
-      // nothing to do
-    }
-
-
-    function WriteSettingTimeFormat()
-    {
-      $checked_value = ($this->Options['wrswl_settings_time_format'] === "minutes") ? 'checked="checked"' : '';
-      echo '<label title="minutes"><input type="radio" name="wrswl_settings[wrswl_settings_time_format]" value="minutes" ' . $checked_value . '/><span class="wrswl-settings-label">' . __('Minutes - 496.38', 'wrs_walking_log') . '</span></label><br />';
-
-      //$checked_value = ($this->Options['wrswl_settings_time_format'] === "hours") ? 'checked="checked"' : '';
-      //echo '<label title="hours"><input type="radio" name="wrswl_settings[wrswl_settings_time_format]" value="hours" ' . $checked_value . '/><span class="wrswl-settings-label">' . __('Hours - 8.28', 'wrs_walking_log') . '</span></label><br />';
-
-      $checked_value = ($this->Options['wrswl_settings_time_format'] === "hh:mm:ss") ? 'checked="checked"' : '';
-      echo '<label title="hh:mm:ss"><input type="radio" name="wrswl_settings[wrswl_settings_time_format]" value="hh:mm:ss" ' . $checked_value . '/><span class="wrswl-settings-label">' . __('hhh:mm:ss - 8:16:23', 'wrs_walking_log') . '</span></label><br />';
-    }
-
-
-    function WriteSettingDistanceFormat()
-    {
-      $checked_value = ($this->Options['wrswl_settings_distance_format'] === "miles") ? 'checked="checked"' : '';
-      echo '<label title="miles"><input type="radio" name="wrswl_settings[wrswl_settings_distance_format]" value="miles" ' . $checked_value . '/><span class="wrswl-settings-label">' . __('Miles', 'wrs_walking_log') . '</span></label><br />';
-
-      $checked_value = ($this->Options['wrswl_settings_distance_format'] === "kilometers") ? 'checked="checked"' : '';
-      echo '<label title="kilometers"><input type="radio" name="wrswl_settings[wrswl_settings_distance_format]" value="kilometers" ' . $checked_value . '/><span class="wrswl-settings-label">' . __('Kilometers', 'wrs_walking_log') . '</span></label><br />';
-
-      echo "\n</div>\n";
-    }
-
-
-    // uninstall settings
-    function WriteUninstallSettingsSection()
-    {
-      // nothing to do
-    }
-
-
-    function WriteSettingUninstall()
-    {
-      // nothing to do
-    }
-
-
-    function WriteAdminGeneralPage()
-    {
-      if (!current_user_can('manage_options')) 
-        wp_die(__('You do not have sufficient permissions to access this page.', 'wrs_walking_log'));
-
-
-      echo '<div class="wrap">' . "\n";
-      echo '  <div class="icon32" id="icon-options-general"><br></div>' . "\n";
-      echo '  <h2>' . __('Walking Log: General Settings', 'wrs_walking_log') . '</h2>' . "\n";
-
-      echo '  <form method="post" action="options.php">' . "\n";
-      echo settings_fields('wrswl_settings_group');
-      echo do_settings_sections('wrswl_walking_log');
-
-      echo '    <p><input type="submit" class="button-primary" value="' . __('Save Changes', 'wrs_walking_log') . '" /></p>' . "\n";
-      echo "  </form>\n";
-      echo "</div>\n";
-    }
-
-
-    function WriteLocationEditor()
-    {
-      global $wpdb;
-
-
-      echo '<table class="wrswl-list-edit">';
-      
-      $sql = "select location_id, name, visible from $this->ExerciseLocationTableName order by location_id";
-      $rows = $wpdb->get_results($sql);
-
-      $odd = true;
-      foreach ($rows as $row)
-      {
-        if ($odd)
-          $class = ' class="odd"';
-        else
-          $class = '';
-          
-        echo '  <tr' . $class . '>';
-
-        $odd = !$odd;
-
-        $url = admin_url('admin.php?page=wrs_walking_log_menu_maintenance&location_id=' . $row->location_id);
-        
-        if ($row->visible === '1')
-        {
-          $action = 'hide';
-          $action_i18n = __('hide', 'wrs_walking_log');
-        }
-        else
-        {
-          $action = 'show';
-          $action_i18n = __('show', 'wrs_walking_log');
-        }
-        
-        $url .= '&action=' . $action;
-        $url = wp_nonce_url($url);
-          
-        echo '    <td style="width:300px;">' . $row->name . '</td><td>';
-        
-        if ($row->location_id != 1)
-          echo '<a href="' . $url . '">' . $action_i18n . '</a>';
-        else
-          echo '&nbsp;';
-          
-        echo '  </td>' . "\n";
-        echo "</tr>\n";
-      }
-
-      echo '</table>';
-      
-      $admin_url = admin_url('admin.php') . '?page=wrs_walking_log_menu_maintenance';
-      
-      echo '<div style="margin-top:10px">';
-      echo '<form method="post" action="' . $admin_url . '">' . "\n";
-      echo '  <input type="hidden" name="action" value="add_location" />';
-      
-      wp_nonce_field();
-      
-      echo '  <input name="add_location_edit" type="text" />';
-      echo '  <input type="submit" class="button-primary" value="' . __('Add Location', 'wrs_walking_log') . '" />' . "\n";
-      echo '</form>';
-      echo '</div>';
-      
-    }
-    
-    
-    function WriteTypeEditor()
-    {
-      global $wpdb;
-      
-      echo '<table class="wrswl-list-edit">';
-      
-      $sql = "select type_id, name, visible from $this->ExerciseTypeTableName order by type_id";
-      $rows = $wpdb->get_results($sql);
-
-      $odd = true;
-      foreach ($rows as $row)
-      {
-        if ($odd)
-          $class = ' class="odd"';
-        else
-          $class = '';
-          
-        echo '  <tr' . $class . '>';
-
-        $odd = !$odd;
-
-        $url = admin_url('admin.php?page=wrs_walking_log_menu_maintenance&type_id=' . $row->type_id);
-        
-        if ($row->visible === '1')
-        {
-          $action = 'hide';
-          $action_i18n = __('hide', 'wrs_walking_log');
-        }
-        else
-        {
-          $action = 'show';
-          $action_i18n = __('show', 'wrs_walking_log');
-        }
-        
-        $url .= '&action=' . $action;
-        $url = wp_nonce_url($url);
-          
-        echo '    <td style="width:300px;">' . $row->name . '</td><td>';
-        
-        if ($row->type_id != 1)
-          echo '<a href="' . $url . '">' . $action_i18n . '</a>';
-        else
-          echo '&nbsp;';
-        
-        echo '  </td>' . "\n";
-        echo "</tr>\n";
-      }
-
-      echo '</table>';
-      
-      $admin_url = admin_url('admin.php') . '?page=wrs_walking_log_menu_maintenance';
-      
-      echo '<div style="margin-top:10px">';
-      echo '<form method="post" action="' . $admin_url . '">' . "\n";
-      echo '  <input type="hidden" name="action" value="add_type" />';
-      
-      wp_nonce_field();
-      
-      echo '  <input name="add_type_edit" type="text" />';
-      echo '  <input type="submit" class="button-primary" value="' . __('Add Type', 'wrs_walking_log') . '" />' . "\n";
-      echo '</form>';
-      echo '</div>';
-      
-    }
-    
 
     function HandleUpdates()
     {
-      if ($_REQUEST['action'])
+      if (!isset($_REQUEST['action'])) return;
+      if (!wp_verify_nonce($_REQUEST['_wpnonce'])) wp_die('Request Failed');
+
+      $action = $_REQUEST['action'];
+      
+      // validate action
+      if ($action != 'add_type' && $action != 'add_location' &&
+          $action != 'show' && $action != 'hide' && $action != 'delete' &&
+          $action != 'test_activation') wp_die('Request failed');
+     
+      switch ($action)
       {
-        if (!wp_verify_nonce($_REQUEST['_wpnonce'])) wp_die('Request Failed');
-
-
-        $action = $_REQUEST['action'];
-        
-
-        // validate action
-        if ($action != 'add_type' && $action != 'add_location' &&
-            $action != 'show' && $action != 'hide') wp_die('Request failed');
-       
-        switch ($action)
-        {
-          case 'hide':
-          case 'show':
-            if ($_REQUEST['type_id'])
-              $this->ToggleExerciseTypeVisibility($_REQUEST['type_id']);
-            else
-              $this->ToggleExerciseLocationVisibility($_REQUEST['location_id']);
-              
-            break;
+        case 'delete':
+          if (isset($_REQUEST['type_id']))
+          {
+            $type_id = $_REQUEST['type_id'];
+            $this->VerifyInteger($type_id);
+            $this->DeleteExerciseType($type_id);
+          }
+          else if (isset($_REQUEST['location_id']))
+          {
+            $location_id = $_REQUEST['location_id'];
+            $this->VerifyInteger($location_id);
+            $this->DeleteExerciseLocation($location_id);
+          }
+          
+          break;
+      
+        case 'hide':
+        case 'show':
+          if (isset($_REQUEST['type_id']))
+          {
+            $type_id = $_REQUEST['type_id'];
+            $this->VerifyInteger($type_id);
+            $this->ToggleExerciseTypeVisibility($type_id);
+          }
+          else if (isset($_REQUEST['location_id']))
+          {
+            $location_id = $_REQUEST['location_id'];
+            $this->VerifyInteger($location_id);
+            $this->ToggleExerciseLocationVisibility($location_id);
+          }
             
-          case 'add_type':
-            $value = htmlentities($_REQUEST['add_type_edit']);
+          break;
+          
+        case 'add_type':
+          if (isset($_REQUEST['add_type_edit']))
+          {
+            $value = htmlentities(stripslashes($_REQUEST['add_type_edit']));
             $this->InsertExerciseTypeRow($value);
-            break;
-            
-          case 'add_location':
-            $value = htmlentities($_REQUEST['add_location_edit']);
+          }
+          break;
+          
+        case 'add_location':
+          if (isset($_REQUEST['add_location_edit']))
+          {
+            $value = htmlentities(stripslashes($_REQUEST['add_location_edit']));
             $this->InsertExerciseLocationRow($value);
-            break;
-            
-        }
+          }
+          break;
+          
+        // case 'test_activation':
+          // $this->IsMultiSite = true;
+          // $this->IsNetworkWide = true;
+          // $this->ActivatePlugin();
+          // break;
+          
       }
-      
     }
-    
-    
-    function WriteAdminMaintenancePage()
-    {
-      global $wpdb;
-
-      echo '<div class="wrap">' . "\n";
-      echo '  <div class="icon32" id="icon-options-general"><br></div>' . "\n";
-      echo '  <h2>' . __('Walking Log: Maintenance', 'wrs_walking_log') . '</h2>' . "\n";
-      
-      $this->HandleUpdates();
-
-      // exercise locations      
-      echo "<h3>Exercise Locations</h3>\n";
-      echo '<div class="wrswl-settings-section">';
-      
-      $this->WriteLocationEditor();
-      
-      echo '</div>';
-      
-      
-      // exercise types
-      echo "<h3>Exercise Types</h3>\n";
-      echo '<div class="wrswl-settings-section">';
-      
-      $this->WriteTypeEditor();
-      
-      echo '</div>';
-      
-      echo "</div>\n";
-    }
-
-
-    function WriteAdminUninstalledPage()
-    {
-      echo '<div class="wrap">' . "\n";
-      echo '  <div class="icon32" id="icon-options-general"><br></div>' . "\n";
-      echo '  <h2>' . __('Walking Log: Uninstall', 'wrs_walking_log') . '</h2>' . "\n";
-      
-      $deactivate_url = 'plugins.php?action=deactivate&amp;plugin=walking-log/walking_log.php';
-      if (function_exists('wp_nonce_url')) 
-        $deactivate_url = wp_nonce_url($deactivate_url, 'deactivate-plugin_walking-log/walking_log.php');
-      
-      echo '  <p>' .
-           __('All Walking Log data has been deleted due to a requested uninstall. Click the link below to complete the ' .
-              'uninstallation and deactivate the plugin. If you want to continue using the plugin ' .
-              'you will need to deactivate it using the link below, then reactivate from the plugins menu.' , 'wrs_walking_log') .
-           "  </p>\n";
-
-      echo '  <a href="' . $deactivate_url . '">' . __('Deactivate Walking Log Plugin', 'wrs_walking_log') . '</a>' . "\n";
-      echo "</div>\n";
-    }
-    
-    function WriteAdminUninstallPage()
-    {
-      if (!current_user_can('manage_options')) 
-        wp_die(__('You do not have sufficient permissions to access this page.', 'wrs_walking_log'));
-
-
-      echo '<div class="wrap">' . "\n";
-      echo '  <div class="icon32" id="icon-options-general"><br></div>' . "\n";
-      echo '  <h2>' . __('Walking Log: Uninstall', 'wrs_walking_log') . '</h2>' . "\n";
-
-
-      // check for uninstall
-      if ($this->UninstallRequest === 'uninstall')
-      {
-        // flag that we've uninstalled        
-        update_option("wrswl_settings_uninstall", "uninstalled");
-
-
-        // remove things we registered
-        remove_shortcode('wrs_walking_log');
-        delete_option("wrswl_db_version");
-        delete_option("wrswl_settings");
-
-        
-        // unregister settings        
-        unregister_setting('wrswl_settings_group', 'wrswl_settings', array(&$this, 'ValidateSettings'));
-        unregister_setting('wrswl_settings_uninstall', 'wrswl_settings_uninstall', array(&$this, 'ValidateUninstallSettings'));
-        //unregister_setting('wrswl_settings_maintenance', 'wrswl_settings_maintenance');
-
-        // remove tables        
-        $this->DropTable($this->ExerciseTypeTableName);
-        $this->DropTable($this->ExerciseLocationTableName);
-        $this->DropTable($this->ExerciseLogTableName);
-
-
-        $deactivate_url = 'plugins.php?action=deactivate&amp;plugin=walking-log/walking_log.php';
-        if (function_exists('wp_nonce_url')) 
-          $deactivate_url = wp_nonce_url($deactivate_url, 'deactivate-plugin_walking-log/walking_log.php');
-        
-        echo '  <p>' .
-             __('All Walking Log data has been deleted. Click the link below to complete the ' .
-                'uninstallation and deactivate the plugin.', 'wrs_walking_log') .
-             "  </p>\n";
-  
-        echo '  <a href="' . $deactivate_url . '">' . __('Deactivate Walking Log Plugin', 'wrs_walking_log') . '</a>' . "\n";
-        echo "</div>\n";
-
-        return;
-      }
-
-
-      echo '  <form method="post" action="options.php">' . "\n";
-
-      echo settings_fields('wrswl_settings_uninstall');
-
-      echo '    <div class="wrswl-settings-section">';
-      
-      echo '<p>' . __("Deactivating or deleting this plugin does <strong>not</strong> delete your settings, or the " .
-                      "saved exercise data. This is a safety measure to make sure you don't accidentally lose your " .
-                      "walking log. If you do want to delete this data you can do so here.", 'wrs_walking_log') . '</p>' . "\n";
-
-      echo '<span style="color:red">' .
-           __('Checking <em>"Yes, I do want to uninstall"</em>, and pressing the <em>"Save Changes"</em> button ' .
-              'will delete all settings and exercise data, and <strong><em>cannot</em></strong> be undone.', 'wrs_walking_log') .
-           '</span></p>' . "\n";
-
-      echo '<p>' . __('If you want to preserve your data you will need to make backups of these MySQL tables:', 'wrs_walking_log') . '</p>' . "\n";
-
-      echo "<ul>\n";
-      echo '  <li><em>' . $this->ExerciseTypeTableName . '</em></li>' . "\n";
-      echo '  <li><em>' . $this->ExerciseLocationTableName . '</em></li>' . "\n";
-      echo '  <li><em>' . $this->ExerciseLogTableName . '</em></li>' . "\n";
-      echo "</ul>\n";
-
-      echo '<p>' . 
-           __('Once the data is deleted the plugin will also be deactivated, after which you can remove it ' .
-              'from WordPress by using the <em>Plugins</em> menu. Or if you want to just reset the data and ' .
-              'start over you can reactivate the plugin and it will initialize all settings with their ' .
-              'default values.', 'wrs_walking_log') .
-           "</p>\n";
-
-      echo '<div id="wrswl-uninstall-confirmation-container">' . "\n";
-      echo '  <label title="uninstall"><input type="checkbox" name="wrswl_settings_uninstall" value="uninstall" />' . "\n";
-      echo '    <span id="wrswl-uninstall-confirmation">' . __('Yes, I do want to uninstall and delete all data, and I understand this cannot be undone.', 'wrs_walking_log') . '</span>' . "\n";
-      echo "  </label><br />\n";
-      echo "</div>\n";
-      
-      echo "</div>\n";
-
-      echo '    <p><input type="submit" class="button-primary" value="' . __('Uninstall', 'wrs_walking_log') . '" /></p>' . "\n";
-      echo "  </form>\n";
-      echo "</div>\n";
-
-
-
-    }
-
-
   }  // class wrsWalkingLogPlugin
 }  // if (! class_exists('wrsWalkingLogPlugin'))
 
 
-
- 
 // create class instance - this handles registering all necessary hooks, creating
 // necessary tables on plugin activation, and so on
 if (class_exists('wrsWalkingLogPlugin'))
   $wrs_WalkingLogPlugin = new wrsWalkingLogPlugin();
-
-
 
 ?>
