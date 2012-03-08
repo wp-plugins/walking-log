@@ -1215,14 +1215,14 @@ if (! class_exists('wrsWalkingLogPlugin'))
     }   
 
 
-    function WriteMonthSelect()
+    function WriteMonthSelect($user_id)
     {
       global $wpdb, $wp_locale;
       
       $sql = "select coalesce(min(log_date), current_date()) as min_date, " .
              "       coalesce(max(log_date), current_date()) as max_date " .
              "from $this->ExerciseLogTableName " .
-             "where wordpress_user_id = $this->CurrentUserId ";
+             "where wordpress_user_id = $user_id ";
       
       $results = $wpdb->get_results($sql);
       $row = $results[0];
@@ -1322,7 +1322,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
       // uncomment this to allow the javascript code to show trace messages during ajax calls
       // echo "\n" . '<div id="trace_message"></div>' . "\n";
       
-      $this->WriteMonthSelect();
+      $this->WriteMonthSelect($user_id);
       $this->UpdateLogPermissions($username);
 
       // add top edit button
