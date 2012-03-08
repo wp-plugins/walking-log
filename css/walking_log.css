@@ -261,3 +261,26 @@ select.wrswl-location-edit
   padding: 2px;
   margin: 0px;
 }
+
+
+.error-text
+{
+  color: red;
+}
+
+
+.info-text
+{
+  color: blue;
+}
+
+
+.success-text
+{
+  color: green;
+}
+
+.half-width
+{
+  width: 50%;
+}

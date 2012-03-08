@@ -423,7 +423,7 @@ var wrsWalkingLog =
     item.hide();
 
     // create status item...
-    item.after('<tr id="status-' + logId + '"><td colspan="5">Deleting...</td></tr>');
+    item.after('<tr id="status-' + logId + '"><td colspan="5">' + wrsWalkingLogSettings.deletingMsg + '</td></tr>');
 
 
     // execute the delete
@@ -432,7 +432,8 @@ var wrsWalkingLog =
        url: wrsWalkingLogSettings.admin_url,
        data: { action: 'delete_log', 
                row_id: logId,
-               nonce: jQuery('input#wrswl_nonce').val()
+               nonce: jQuery('input#wrswl_nonce').val(),
+               action_id: jQuery('input#wrswl_id').val()
              },
        
        success: function(data)
@@ -462,10 +463,10 @@ var wrsWalkingLog =
       },
         
        
-      failure: function()
+      error: function()
       {
-        // some very poor error handling
-        item.html('<tr><td colspan="5" style="width:100%;">Something went wrong. Refresh the page and try again.</td></tr>').fadeIn('fast');
+        // some very poor error handling, replace status with new message
+        jQuery('#status-' + logId).html('<td colspan="5">' + wrsWalkingLogSettings.errorMsg + '</td>').fadeIn('fast');
       }
     });
   },
@@ -567,8 +568,8 @@ var wrsWalkingLog =
     // create status item after the item we're editing
     // the edited item remains hidden until the ajax request completes, after which
     // this status item will be removed
-    item.after('<tr id="status-' + logId + '"><td colspan="5">Updating...</td></tr>');
-    
+    item.after('<tr id="status-' + logId + '"><td colspan="5">' + wrsWalkingLogSettings.updatingMsg + '</td></tr>');
+
     
     jQuery.ajax({
        type: 'POST',
@@ -581,7 +582,8 @@ var wrsWalkingLog =
          distance: distanceValue,
          type_id: typeValue,
          location_id: locationValue,
-         nonce: jQuery('input#wrswl_nonce').val()
+         nonce: jQuery('input#wrswl_nonce').val(),
+         action_id: jQuery('input#wrswl_id').val()
        },
        
        success: function(data)
@@ -673,10 +675,10 @@ var wrsWalkingLog =
          }
        },    // success
          
-       failure: function()
+       error: function()
        {
-         // some very poor error handling
-         item.html('<tr><td colspan="5" style="width:100%;">Something went wrong. Refresh the page and try again.</td></tr>').fadeIn('fast');
+         // some very poor error handling, replace status with new message
+         jQuery('#status-' + logId).html('<td colspan="5">' + wrsWalkingLogSettings.errorMsg + '</td>').fadeIn('fast');
        }
      });
   },
@@ -790,7 +792,7 @@ var wrsWalkingLog =
   {
     var thisInstance = this;
     
-    jQuery('#wrswl-monthly-data').html('<p><br />Loading...</p>').show();
+    jQuery('#wrswl-monthly-data').html('<p><br />' + wrsWalkingLogSettings.loadingMsg + '</p>').show();
 
     // we're no longer editing a row
     this.editingRow = false;
@@ -801,7 +803,8 @@ var wrsWalkingLog =
       data: { action: 'get_log', 
               date: this.selectedDate, 
               random: Math.random(),
-              nonce: jQuery('input#wrswl_nonce').val()
+              nonce: jQuery('input#wrswl_nonce').val(),
+              action_id: jQuery('input#wrswl_id').val()
             }, // random is to prevent caching
        
       success: function(data)
@@ -829,14 +832,14 @@ var wrsWalkingLog =
           thisInstance.debugMsg(data);
           
           // some very poor error handling
-          jQuery('#wrswl-monthly-data').html('Something went wrong. Refresh the page and try again.').fadeIn('fast');
+          jQuery('#wrswl-monthly-data').html(wrsWalkingLogSettings.errorMsg).fadeIn('fast');
         }
       },
         
-      failure: function()
+      error: function()
       {
         // some very poor error handling
-        jQuery('#wrswl-monthly-data').html('Something went wrong. Refresh the page and try again.').fadeIn('fast');
+        jQuery('#wrswl-monthly-data').html(wrsWalkingLogSettings.errorMsg).fadeIn('fast');
       }
     });
   },

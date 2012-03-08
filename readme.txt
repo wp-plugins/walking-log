@@ -4,7 +4,7 @@ Donate link:
 Tags: exercise, walking, hiking
 Requires at least: 3.0
 Tested up to: 3.3.1
-Stable tag: 1.1
+Stable tag: 1.2
 
 Exercise log for tracking time and distance based exercise, such as walking or running.
 
@@ -13,8 +13,8 @@ Exercise log for tracking time and distance based exercise, such as walking or r
 Walking Log is a WordPress plugin for tracking time and distance based exercise, such as walking or hiking. 
 The plugin allows you to track date, exercise time in minutes, distance, type (e.g. walking), and location.
 
-The log can be viewed and edited within the admin pages, or it can be placed in a post or page with various
-viewing permissions and editing permissions.
+Each blog user has his or her own log which can be viewed and edited within the admin pages, or it can be
+placed in a post or page with various viewing permissions and editing permissions by using short codes.
 
 == Installation ==
 
@@ -22,9 +22,11 @@ viewing permissions and editing permissions.
 1. Activate the plugin through the 'Plugins' menu in WordPress
 1. Create a page, or identify an existing page, that will be used to host the log
 1. Add this short code to the page: [wrs_walking_log view="main"]
-1. Add a custom field to the page with a name of wrs_walking_log (along with any value). This is required so 
+1. Add a custom field to the page with a name of wrs_walking_log and a value of 1. This is required so 
    the plugin can load itself only on pages where it's needed.
 1. Add new exercise types and locations using the Walking Log admin pages.
+1. If you're upgrading a previous installation you will be asked to assign existing log data to a blog user.
+1. Additional instructions can be found in the plugin's admin options page.
 
 
 == Frequently Asked Questions ==
@@ -42,6 +44,14 @@ accidentally deleting a lot of data.
 
 == Changelog ==
 
+= 1.2 =
+* The logs are now tracked by blog user, rather than having a single log per blog.
+* Added the ability to show a log for a specific user.
+* Some optimizations to prevent loading scripts when not needed.
+* Added admin options to control how data is preserved or deleted when the plugin is uninstalled.
+* Admin can flag exercise types and locations as global so they show for all users.
+* Security enhancements.
+
 = 1.1 =
 * Multisite network is now supported.
 * Added log viewing and editing from within admin pages.
@@ -56,6 +66,9 @@ accidentally deleting a lot of data.
 * Initial version.
 
 == Upgrade Notice ==
+
+= 1.2 =
+Logs are now user based rather than a single global log, optimizations, security enhancements.
 
 = 1.1 =
 Log viewing and editing from admin pages, multisite now supported, new privacy settings, style sheet improvements, bug fixes.

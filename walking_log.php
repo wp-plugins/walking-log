@@ -5,7 +5,7 @@
 Plugin Name: Walking Log
 Plugin URI: http://www.willowridgesoftware.com/apps.php
 Description: Exercise log for tracking time and distance based exercise, such as walking or running.
-Version: 1.1
+Version: 1.2
 Author: Dave Carlile
 Author URI: http://www.crappycoding.com
 License: MIT
@@ -42,18 +42,27 @@ if (! class_exists('wrsWalkingLogPlugin'))
 {
   class wrsWalkingLogPlugin
   {
+    var $LegacyScope = 0;
+    var $GlobalScope = 1;
+    var $UserScope = 2;
+    var $GlobalPermanentScope = 3;
+  
     var $Admin;
-    var $dbVersion = '1.2';
+    var $dbVersion = '1.3';
     var $ExerciseTypeTableName;
     var $ExerciseLocationTableName;
     var $ExerciseLogTableName;
+    var $Settings;
     var $Options;
     var $TimeSeparator;
-    var $UninstallRequest;
     var $IsMultiSite;
     var $IsNetworkWide;
-    var $CurrentUserIsAuthor;
     var $CurrentUserCanEditLog;
+    var $CurrentUserId;
+    var $CurrentUserLogin;
+    var $AdminNotices;
+    var $LegacyNotice;
+    var $HasLegacyData;
 
     
     function wrsWalkingLogPlugin()
@@ -62,7 +71,6 @@ if (! class_exists('wrsWalkingLogPlugin'))
       $this->IsNetworkWide = isset($_GET['networkwide']) && $_GET['networkwide'] == 1;
       $this->TimeSeparator = ':';
       $this->InitializeTableNames();
-      $this->InitializeSettings();
 
       // hooks
       register_activation_hook(__FILE__, array(&$this, 'ActivatePlugin'));
@@ -78,10 +86,15 @@ if (! class_exists('wrsWalkingLogPlugin'))
         {
           add_action('network_admin_menu', array(&$this->Admin, 'NetworkAdminMenu'));
         }
-        
+
+        add_action('admin_notices', array(&$this, 'WriteAdminNotices'));
         add_action('admin_menu', array(&$this->Admin, 'AdminMenu'));
         add_action('admin_init', array(&$this->Admin, 'AdminInit'));
         add_action('admin_print_styles', array(&$this, 'PrintStyles'));
+        
+        // legacy log user assignment notice
+        $this->LegacyNotice = get_option("wrswl_legacy_notice");
+        $this->HasLegacyData = get_option("wrswl_has_legacy");
       }
 
       
@@ -92,7 +105,6 @@ if (! class_exists('wrsWalkingLogPlugin'))
         //add_action('wpmu_delete_blog', array(&$this, 'DeleteBlog'), 10, 1);
         
         add_filter('wpmu_drop_tables', array(&$this, 'DropTablesForBlog'));
-        
       }
 
       // event actions
@@ -100,6 +112,8 @@ if (! class_exists('wrsWalkingLogPlugin'))
       add_action('wp_print_scripts', array(&$this, 'PrintScripts'));
       add_action('wp_print_styles', array(&$this, 'PrintStyles'));
       add_action('wp_print_footer_scripts', array(&$this, 'PrintFooterScripts'));
+      add_action('deleted_user', array(&$this, 'DeleteUser'));
+      add_action('remove_user_from_blog', array(&$this, 'RemoveUserFromBlog'));
 
       // ajax actions
       add_action('wp_ajax_get_log', array(&$this, 'GetLogForDate'));
@@ -110,46 +124,175 @@ if (! class_exists('wrsWalkingLogPlugin'))
     }
 
 
+    function GetUserSettings($user_id)
+    {
+      global $wpdb;
+      
+      // user settings
+      $result = get_user_meta($user_id, $wpdb->prefix . 'wrswl_settings', true);
+
+      if (!isset($result['wrswl_settings_time_format']))
+        $result['wrswl_settings_time_format'] = 'minutes';
+
+      if (!isset($result['wrswl_settings_distance_format']))
+        $result['wrswl_settings_distance_format'] = 'miles';
+        
+      if (!isset($result['wrswl_settings_privacy']))
+        $result['wrswl_settings_privacy'] = 'public';
+    
+      return $result;
+    }
+    
+    
     function InitializeSettings()
     {
-      $this->Options = get_option('wrswl_settings');
-
-      if (!isset($this->Options['wrswl_settings_time_format']))
-        $this->Options['wrswl_settings_time_format'] = 'minutes';
-
-      if (!isset($this->Options['wrswl_settings_distance_format']))
-        $this->Options['wrswl_settings_distance_format'] = 'miles';
+      // user settings
+      $this->Settings = $this->GetUserSettings($this->CurrentUserId);
+      
+      // global options
+      $this->Options = get_option('wrswl_options');
+      
+      if (!isset($this->Options['delete_data_on_user_delete']))
+        $this->Options['delete_data_on_user_delete'] = 'false';
+      
+      if (!isset($this->Options['drop_tables_on_uninstall']))
+        $this->Options['drop_tables_on_uninstall'] = 'false';
         
-      if (!isset($this->Options['wrswl_settings_privacy']))
-        $this->Options['wrswl_settings_privacy'] = 'public';
-        
-      // uninstall request      
-      $this->UninstallRequest = get_option('wrswl_settings_uninstall');
-      if (! $this->UninstallRequest)
-        $this->UninstallRequest = 'no';
+      if (!isset($this->Options['allow_subscriber_role']))
+        $this->Options['allow_subscriber_role'] = 'false';
+    }
+	
+
+    function SaveNewSettings($settings)
+    {
+      global $wpdb;
+      $this->Settings = $settings;
+      update_user_meta($this->CurrentUserId, $wpdb->prefix . 'wrswl_settings', $settings);
     }
 
+    
+    function SaveNewOptions($options)
+    {
+      $this->Options = $options;
+      update_option('wrswl_options', $options);
+    }
+    
 
+    function LegacyDataHasBeenAssigned()
+    {
+      return (isset($_REQUEST['action']) && $_REQUEST['action'] == 'assign' && 
+             isset($_REQUEST['page']) && $_REQUEST['page'] == 'wrs_walking_log_menu_upgrade' &&
+             !isset($_REQUEST['change_user_button']));
+    }
+    
+    
+    function WriteAdminNotices()
+    {
+    
+      // legacy log user assignment notice
+      if (isset($this->LegacyNotice) && $this->LegacyNotice == 1 && !$this->LegacyDataHasBeenAssigned())
+      {
+        $skip = false;
+        if (isset($_REQUEST['page']) && $_REQUEST['page'] == 'wrs_walking_log_menu_upgrade')
+          $skip = true;
+          
+        if (!$skip)
+        {
+          $admin_url = admin_url('admin.php') . '?page=wrs_walking_log_menu_upgrade';
+        
+          $this->AdminNotice(sprintf(__('You recently upgraded the Walking Log plugin to Version 1.2. Log data from a previous version needs to be assigned to a blog user. ' .
+                             'Please visit the <a href="%s">Upgrade</a> page in Walking Log Settings to resolve this issue.', 
+                             'wrs_walking_log'), $admin_url));
+        }
+      }
+
+
+      if (!isset($this->AdminNotices)) return;
+      if (!is_array($this->AdminNotices)) return;
+      
+      foreach ($this->AdminNotices as $notice)
+      {
+        echo '<div class="updated"><p>' . $notice . '</p></div>';
+      }
+    }
+
+    
+    function AdminNotice($message)
+    {
+      $this->AdminNotices[] = $message;
+    }
+
+    
+    function ClearLegacyNotice()
+    {
+      delete_option('wrswl_legacy_notice');
+      unset($this->LegacyNotice);
+    }
+    
+    
+    function ClearLegacyData()
+    {
+      delete_option('wrswl_has_legacy');
+      unset($this->HasLegacyData);
+    }
+    
+    
     function RefreshUserInfo()
     {    
       global $current_user;
       get_currentuserinfo();
-      $this->CurrentUserIsAuthor = get_the_author() == $current_user->display_name;
-      $this->CurrentUserCanEditLog = current_user_can('manage_options') || $this->CurrentUserIsAuthor;
+      $this->CurrentUserId = $current_user->ID;
+      $this->CurrentUserLogin = $current_user->user_login;
     }
     
 
     function PluginsLoaded()
     {
       add_shortcode('wrs_walking_log', array(&$this, 'HandleShortCodes'));
+      $this->RefreshUserInfo();
+      $this->InitializeSettings();
+    }
+    
+    
+    function CheckDefaults()
+    {
+      global $wpdb;
+      
+      if ($this->CurrentUserId == 0) return;
+      if (!current_user_can('read')) return;
+      
+      // if this is the first time this user has access the plugin the do some user initialization
+      $first_run_for_user = get_user_meta($this->CurrentUserId, $wpdb->prefix . 'wrswl_first_run', true);
+      if ($first_run_for_user == "")
+      {
+        // insert defaults for this user - the user shouldn't have any of this data, but we'll make sure just in case
+        $row_count = $wpdb->get_var("select count(0) from $this->ExerciseTypeTableName where wordpress_user_id = $this->CurrentUserId and scope = $this->UserScope");
+        
+        if ($row_count == 0)
+        {
+          $this->InsertExerciseTypeRow($this->CurrentUserId, $this->UserScope, __('Walking', 'wrs_walking_log'));
+          $this->InsertExerciseTypeRow($this->CurrentUserId, $this->UserScope, __('Hiking', 'wrs_walking_log'));
+          $this->InsertExerciseTypeRow($this->CurrentUserId, $this->UserScope, __('Jogging', 'wrs_walking_log'));
+          $this->InsertExerciseTypeRow($this->CurrentUserId, $this->UserScope, __('Biking', 'wrs_walking_log'));
+        }
+      }
+      
+      update_user_meta($this->CurrentUserId, $wpdb->prefix . 'wrswl_first_run', true);
     }
 
-
+    
     function IsWalkingLogPage()
     {
-      global $wp_query;
+      global $wp_query, $pagenow;
 
-      if (is_admin()) return true;
+      // if admin screen then scripts are only needed for the log view page
+      if (is_admin() && isset($_REQUEST['page']) && $pagenow == 'admin.php')
+      {
+      
+        $page = $_REQUEST['page'];
+        return $page == 'wrs_walking_log_menu_view' or $page == 'wrs_walking_log_menu_upgrade' or $page == 'wrs_walking_log_menu' or
+               $page == 'wrs_walking_log_menu_maintenance' or $page == 'wrs_walking_log_network_menu';
+      }
       
       // make sure it's a single page or post
       if (!is_page() && ! is_single()) return false;
@@ -188,8 +331,8 @@ if (! class_exists('wrsWalkingLogPlugin'))
       // create walking log settings object
       $exercise_types = $this->GetExerciseTypes();
       $exercise_locations = $this->GetExerciseLocations();
-      $time_format = $this->Options['wrswl_settings_time_format'];
-      $distance_format = $this->Options['wrswl_settings_distance_format'];
+      $time_format = $this->Settings['wrswl_settings_time_format'];
+      $distance_format = $this->Settings['wrswl_settings_distance_format'];
       $decimal_point = $wp_locale->number_format['decimal_point'];
       $thousands_separator = $wp_locale->number_format['thousands_sep'];
       
@@ -206,7 +349,11 @@ if (! class_exists('wrsWalkingLogPlugin'))
           distanceFormat: '<?php echo $distance_format ?>',
           thousandsSeparator: '<?php echo $thousands_separator ?>',
           decimalPoint: '<?php echo $decimal_point ?>',
-          timeSeparator: '<?php echo $this->TimeSeparator ?>'
+          timeSeparator: '<?php echo $this->TimeSeparator ?>',
+          updatingMsg: '<?php _e('Updating...', 'wrs_walking_log') ?>',
+          deletingMsg: '<?php _e('Deleting...', 'wrs_walking_log') ?>',
+          loadingMsg: '<?php _e('Loading...', 'wrs_walking_log') ?>',
+          errorMsg: '<?php _e('Something went wrong. Refresh the page and try again.', 'wrs_walking_log') ?>'
         };
         /* ]]> */
       </script>
@@ -222,6 +369,46 @@ if (! class_exists('wrsWalkingLogPlugin'))
     {
     }
 
+    
+    function RemoveUserFromBlog($user_id, $blog_id)
+    {
+      // the proper blog is already active when WordPress calls this, but we need to get the table names
+      $this->InitializeTableNames();
+      $this->DeleteUserForBlog($user_id);
+    }
+    
+    
+    function DeleteUser($user_id)
+    {
+      $this->DeleteUserForBlog($user_id);
+    }
+    
+    
+    function DeleteUserForBlog($user_id)
+    {
+      global $wpdb;
+
+      // remove user settings
+	    delete_user_meta($user_id, $wpdb->prefix . 'wrswl_settings');
+      delete_user_meta($user_id, $wpdb->prefix . 'wrswl_first_run');
+
+
+      // remove user data - make sure we have the options for the currently active blog
+      $options = get_option('wrswl_options'); 
+      
+      if ($options['delete_data_on_user_delete'] === 'true')
+      {
+        $sql = $wpdb->prepare("delete from $this->ExerciseTypeTableName where wordpress_user_id = $user_id");
+        $wpdb->query($sql);
+        
+        $sql = $wpdb->prepare("delete from $this->ExerciseLocationTableName where wordpress_user_id = $user_id");
+        $wpdb->query($sql);
+        
+        $sql = $wpdb->prepare("delete from $this->ExerciseLogTableName where wordpress_user_id = $user_id");
+        $wpdb->query($sql);
+      }
+    }
+    
 
     function InitializeTableNames()
     {
@@ -254,119 +441,130 @@ if (! class_exists('wrsWalkingLogPlugin'))
 
         add_option("wrswl_db_version", $this->dbVersion);
 
-        return TRUE;
+        return true;
       }
 
-      return FALSE;
+      return false;
     }
 
 
-    function AlterTable($prefixed_table_name, $sql)
+    function DeleteExerciseType($user_id, $id)
     {
       global $wpdb;
-
-      $sql_create_table = "CREATE TABLE " . $prefixed_table_name . "  (  " . $sql . "  )  ;";
-
-      require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
-      dbDelta($sql_create_table);
-    }
-
-
-    function DeleteExerciseType($id)
-    {
-      global $wpdb;
-      $sql = $wpdb->prepare("delete from $this->ExerciseTypeTableName where type_id = %d", $id);
+      $sql = $wpdb->prepare("delete from $this->ExerciseTypeTableName where type_id = %d and wordpress_user_id = $user_id", $id);
       $wpdb->query($sql);
     }
     
     
-    function DeleteExerciseLocation($id)
+    function DeleteExerciseLocation($user_id, $id)
     {
       global $wpdb;
-      $sql = $wpdb->prepare("delete from $this->ExerciseLocationTableName where location_id = %d", $id);
+      $sql = $wpdb->prepare("delete from $this->ExerciseLocationTableName where location_id = %d and wordpress_user_id = $user_id", $id);
       $wpdb->query($sql);
     }
     
     
-    function ToggleExerciseTypeVisibility($id)
+    function ToggleExerciseTypeVisibility($user_id, $id)
     {
       global $wpdb;
-      $sql = $wpdb->prepare("update $this->ExerciseTypeTableName set visible = case when visible = 0 then 1 else 0 end where type_id = %d", $id);
+      $sql = $wpdb->prepare("update $this->ExerciseTypeTableName set visible = case when visible = 0 then 1 else 0 end " .
+                            "where type_id = %d and wordpress_user_id = $user_id", $id);
       $wpdb->query($sql);
     }
     
     
-    function ToggleExerciseLocationVisibility($id)
+    function ToggleExerciseLocationVisibility($user_id, $id)
     {
       global $wpdb;
-      $sql = $wpdb->prepare("update $this->ExerciseLocationTableName set visible = case when visible = 0 then 1 else 0 end where location_id = %d", $id);
-      $wpdb->query($sql);
-    }
-    
-    
-    function InsertExerciseTypeRow($name)
-    {
-      global $wpdb;
-      $sql = $wpdb->prepare("insert into $this->ExerciseTypeTableName (type_id, name, visible) values(0, %s, 1);", $name);
+      $sql = $wpdb->prepare("update $this->ExerciseLocationTableName set visible = case when visible = 0 then 1 else 0 end " .
+                            "where location_id = %d and wordpress_user_id = $user_id", $id);
       $wpdb->query($sql);
     }
 
 
-    function InsertExerciseLocationRow($name)
+    function SetExerciseTypeScope($user_id, $id, $new_scope)
     {
       global $wpdb;
-      $sql = $wpdb->prepare("insert into $this->ExerciseLocationTableName (location_id, name, visible) values(0, %s, 1);", $name);
+      $sql = $wpdb->prepare("update $this->ExerciseTypeTableName set scope = %s " .
+                            "where type_id = %d and wordpress_user_id = %d", $new_scope, $id, $user_id);
+      $wpdb->query($sql);
+    }
+    
+    
+    function SetExerciseLocationScope($user_id, $id, $new_scope)
+    {
+      global $wpdb;
+      $sql = $wpdb->prepare("update $this->ExerciseLocationTableName set scope = %s " .
+                            "where location_id = %d and wordpress_user_id = %d", $new_scope, $id, $user_id);
+      $wpdb->query($sql);
+    }
+
+    
+    function InsertExerciseTypeRow($user_id, $scope, $name)
+    {
+      global $wpdb;
+      $sql = $wpdb->prepare("insert into $this->ExerciseTypeTableName (type_id, wordpress_user_id, name, visible, scope) values(0, %d, %s, 1, %d);", $user_id, $name, $scope);
       $wpdb->query($sql);
     }
 
 
-    function CreateExerciseTypeTable()
+    function InsertExerciseLocationRow($user_id, $scope, $name)
+    {
+      global $wpdb;
+      $sql = $wpdb->prepare("insert into $this->ExerciseLocationTableName (location_id, wordpress_user_id, name, visible, scope) values(0, %d, %s, 1, %d);", $user_id, $name, $scope);
+      $wpdb->query($sql);
+    }
+
+
+    function CreateExerciseTypeTable($user_id)
     {
       $sql = "
         type_id int NOT NULL AUTO_INCREMENT, 
+        wordpress_user_id int NOT NULL,
         name varchar(60) NOT NULL,
         visible tinyint NOT NULL,
-        UNIQUE KEY type_id (type_id)
+        scope tinyint NOT NULL,
+        UNIQUE KEY type_id (type_id),
+        KEY user_type (wordpress_user_id, type_id)
       ";
 
       if ($this->CreateTable($this->ExerciseTypeTableName, $sql))
       {
         /* translators: An exercise type or location not specifically listed */
-        $this->InsertExerciseTypeRow(__('Other', 'wrs_walking_log'));
-        $this->InsertExerciseTypeRow(__('Walking', 'wrs_walking_log'));
-        $this->InsertExerciseTypeRow(__('Hiking', 'wrs_walking_log'));
-        $this->InsertExerciseTypeRow(__('Jogging', 'wrs_walking_log'));
-        $this->InsertExerciseTypeRow(__('Biking', 'wrs_walking_log'));
+        $this->InsertExerciseTypeRow($user_id, $this->GlobalPermanentScope, __('Other', 'wrs_walking_log'));
       }
     }
 
 
-    function CreateExerciseLocationTable()
+    function CreateExerciseLocationTable($user_id)
     {
       $sql = "
         location_id int NOT NULL AUTO_INCREMENT,
+        wordpress_user_id int NOT NULL,
         name varchar(60) NOT NULL,
         visible tinyint NOT NULL,
-        UNIQUE KEY location_id (location_id)
+        scope tinyint NOT NULL,
+        UNIQUE KEY location_id (location_id),
+        KEY user_location (wordpress_user_id, location_id)
       ";
       
       if ($this->CreateTable($this->ExerciseLocationTableName, $sql))
       {
-        $this->InsertExerciseLocationRow(__('Other', 'wrs_walking_log'));
+        /* translators: An exercise type or location not specifically listed */
+        $this->InsertExerciseLocationRow($user_id, $this->GlobalPermanentScope, __('Other', 'wrs_walking_log'));
       }
     }
 
 
-    function InsertLogRow($log_date, $elapsed_time, $distance, $type_id, $location_id, $verify_nonce = true)
+    function InsertLogRow($user_id, $log_date, $elapsed_time, $distance, $type_id, $location_id)
     {
       global $wpdb;
+      
+      $sql = $wpdb->prepare("insert into $this->ExerciseLogTableName (log_id, wordpress_user_id, log_date, elapsed_time, distance, type_id, location_id) " .
+                   "values(0, %d, %s, %f, %f, %d, %d)", $user_id, $log_date, $elapsed_time, $distance, $type_id, $location_id);
 
-      if ($verify_nonce)
-        $this->VerifyNonce();
+      $wpdb->query($sql);
 
-      $wpdb->query($wpdb->prepare("insert into $this->ExerciseLogTableName (log_id, log_date, elapsed_time, distance, type_id, location_id) " .
-                   "values(0, %s, %f, %f, %d, %d)", $log_date, $elapsed_time, $distance, $type_id, $location_id));
-                   
       return $wpdb->insert_id;
     }
 
@@ -377,78 +575,21 @@ if (! class_exists('wrsWalkingLogPlugin'))
       
       $sql = "
         log_id int NOT NULL AUTO_INCREMENT,
+        wordpress_user_id int NOT NULL,
         log_date date NOT NULL,
         elapsed_time float NOT NULL,
         distance float NOT NULL,
         type_id int NOT NULL,
         location_id int NOT NULL,
         UNIQUE KEY log_id (log_id),
-        KEY type_id (type_id),
-        KEY location_id (location_id)
+        KEY user_type (wordpress_user_id, type_id),
+        KEY user_location (wordpress_user_id, location_id)
       ";
       
       $this->CreateTable($this->ExerciseLogTableName, $sql);
     }
 
 
-    function UpdateExerciseTypeTable_11()
-    {
-      global $wpdb;
-
-      $sql = "
-        type_id int NOT NULL AUTO_INCREMENT, 
-        name varchar(60) NOT NULL,
-        visible tinyint NULL,
-        UNIQUE KEY type_id (type_id)
-      ";
-
-      $this->AlterTable($this->ExerciseTypeTableName, $sql);
-
-      // initialize new column
-      $sql = $wpdb->prepare("update $this->ExerciseTypeTableName set visible = 1 where visible is null");
-      $wpdb->query($sql);
-    }
-
-
-    function UpdateExerciseLocationTable_11()
-    {
-      global $wpdb;
-
-      $sql = "
-        location_id int NOT NULL AUTO_INCREMENT,
-        name varchar(60) NOT NULL,
-        visible tinyint NULL,
-        UNIQUE KEY location_id (location_id)
-      ";
-
-      $this->AlterTable($this->ExerciseLocationTableName, $sql);
-
-      // initialize new column
-      $sql = $wpdb->prepare("update $this->ExerciseLocationTableName set visible = 1 where visible is null ");
-      $wpdb->query($sql);
-    }
-
-    
-    function UpdateExerciseLogTable_12()
-    {
-      global $wpdb;
-      
-      $sql = "
-        log_id int NOT NULL AUTO_INCREMENT,
-        log_date date NOT NULL,
-        elapsed_time float NOT NULL,
-        distance float NOT NULL,
-        type_id int NOT NULL,
-        location_id int NOT NULL,
-        UNIQUE KEY log_id (log_id),
-        KEY type_id (type_id),
-        KEY location_id (location_id)
-      ";
-      
-      $this->AlterTable($this->ExerciseLogTableName, $sql);
-    }
-    
-    
     function SwitchBlog($blog_id)
     {
       switch_to_blog($blog_id);
@@ -490,7 +631,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
     function ActivatePlugin()
     {
       global $wpdb;
-    
+
       // if network wide activation then activate for all blogs, otherwise just for the currently active blog
       if ($this->IsMultiSite && $this->IsNetworkWide)
       {
@@ -513,38 +654,25 @@ if (! class_exists('wrsWalkingLogPlugin'))
 	
     function ActivateForBlog()
     {	
-      // make sure the uninstall request option isn't around, in case we somehow got
-      // deactivated without removing it
-      delete_option("wrswl_settings_uninstall");
-
-      // create and populate tables if they don't exist
-      $this->CreateExerciseTypeTable();
-      $this->CreateExerciseLocationTable();
-      $this->CreateExerciseLogTable();
-
-	
+      // create and populate tables if they don't exist - blog activator ads the global values
+      $this->CreateExerciseTypeTable($this->CurrentUserId);
+      $this->CreateExerciseLocationTable($this->CurrentUserId);
+      $this->CreateExerciseLogTable($this->CurrentUserId);
+      
+      
       // upgrade tables
       $installed_ver = get_option("wrswl_db_version");
 
       if ($installed_ver != $this->dbVersion)
       {
+        require_once('walking_log_upgrade.php');
+        wrsWalkingLogUpgrade::UpgradePlugin($this, $installed_ver, $has_legacy_data);
         
-        // 1.0 -> 1.1
-        if ($installed_ver == '1.0')
+        // set option to control admin notice regarding legacy data
+        if ($has_legacy_data)
         {
-          $this->UpdateExerciseTypeTable_11();
-          $this->UpdateExerciseLocationTable_11();
-
-          $installed_ver = '1.1';
-          update_option("wrswl_db_version", $installed_ver);
-        }
-        
-        // 1.1 -> 1.2
-        if ($installed_ver == '1.1')
-        {
-          $this->UpdateExerciseLogTable_12();
-          $installed_ver = '1.2';
-          update_option("wrswl_db_version", $installed_ver);
+          add_option("wrswl_has_legacy", 1);
+          add_option("wrswl_legacy_notice", 1);
         }
       }
     }
@@ -576,93 +704,148 @@ if (! class_exists('wrsWalkingLogPlugin'))
 	
     function DeactivateForBlog()
     {
-      // we want to leave this option until the plugin is actually deactivated, because we've already deleted
-      // all of the other plugin fields and options
-      delete_option("wrswl_settings_uninstall");
     }
     
     
     function UninstallPlugin()
     {
-      // flag that we've uninstalled        
-      update_option("wrswl_settings_uninstall", "uninstalled");
-
+      global $wpdb;
+      
+      // make sure existing settings are loaded
+      $this->InitializeSettings();
+      
+      
+      // unregister settings, NOTE : these are no longer used,  but we'll keep the unregister in for awhile to make sure they get deleted
+      unregister_setting('wrswl_settings_group', 'wrswl_settings', array(&$this->Admin, 'ValidateSettings'));
+      unregister_setting('wrswl_settings_uninstall', 'wrswl_settings_uninstall', array(&$this->Admin, 'ValidateUninstallSettings'));
+      delete_option('wrswl_settings');
+      delete_option('wrswl_settings_uninstall');
+      
 
       // remove things we registered
       remove_shortcode('wrs_walking_log');
-      delete_option("wrswl_db_version");
-      delete_option("wrswl_settings");
+      delete_option('wrswl_db_version');
+      delete_option('wrswl_options');
 
+
+      // remove metadata entries for all users      
+      delete_metadata('user', 0, $wpdb->prefix . 'wrswl_first_run', '', true);
+      delete_metadata('user', 0, $wpdb->prefix . 'wrswl_settings', '', true);
       
-      // unregister settings        
-      unregister_setting('wrswl_settings_group', 'wrswl_settings', array(&$this, 'ValidateSettings'));
-      unregister_setting('wrswl_settings_uninstall', 'wrswl_settings_uninstall', array(&$this, 'ValidateUninstallSettings'));
-
       
       // remove tables, note that this is only dropping the tables in the current blog
-      if (!$this->IsMultiSite)
+      if (!$this->IsMultiSite && $this->Options['drop_tables_on_uninstall'] === 'true')
       {
         $this->DropTable($this->ExerciseTypeTableName);
         $this->DropTable($this->ExerciseLocationTableName);
         $this->DropTable($this->ExerciseLogTableName);
       }
     }
+
     
-    
-    function ShowNoDisplayView()
+    function HasAdminAccess()
     {
-      echo '<p><em>>>> ';
-      _e('Walking Log only displays on pages and single post views.', 'wrs_walking_log');
-      echo ' <<<</em></p>';
+      $capability = 'edit_posts';
+      if ($this->Options['allow_subscriber_role'] === "true")
+        $capability = 'read';
+        
+      return current_user_can($capability);
+    } 
+    
+    
+    
+    function ShowNoDisplayView($message)
+    {
+      echo '<p><em>';
+      echo $message;
+      echo '</em></p>';
     }
     
 
     function ShowPrivateView()
     {
-      echo '<p><em>>>> ';
+      echo '<p><em>';
       _e('This Walking Log is private.', 'wrs_walking_log');
-      echo ' <<<</em></p>';
+      echo '</em></p>';
     }
 
 
     // [wrs_walking_log view="main"]
     function HandleShortCodes($atts)
     {
+      global $current_user;
+    
       extract(shortcode_atts(array(
-                'view' => 'unknown'
+                'view' => 'unknown',
+                'user' => ''
               ), $atts));
 
 
-      $View = $view;
-
-      // TODO : clean value
-
-      $this->RefreshUserInfo();
+              
+      // get user id, either current user, or specific user
+      if ($user != '')
+      {
+        $user_info = new WP_user($user);
+        $user_id = $user_info->ID;
+      }
+      else
+      {
+        $user_id = $this->CurrentUserId;
+      }
       
+      $settings = $this->GetUserSettings($user_id);
+              
+             
       // never display if not a page or single post      
       if (!is_page() && !is_single())
-        $View = 'no_display';
-        
+      {
+        $no_display_message = __('Walking Log only displays on pages and single post views.');
+        $view = 'no_display';
+      }
+
+      // can't display current user log if no user logged in
+      else if ($user == '' && !is_user_logged_in())
+      {
+        $no_display_message = __('You don\'t have a Walking Log.');
+        $view = 'no_display';
+      }
+
+      // logged in user always has access to their own log, and admin users always have access to all logs
+      // with the exception that a subscriber role user may not have their own log
+      else if ($user_id == $this->CurrentUserId || current_user_can('manage_options'))
+      {
+        // are subscribers allowed?
+        if ($this->Options['allow_subscriber_role'] === 'false' && !current_user_can('edit_posts'))
+        {
+          $no_display_message = __('You don\'t have a Walking Log.');
+          $view = 'no_display';
+        }
+        else
+        {
+          // kind of odd logic here, but just keep the current $view settings, note that this 
+          // must fall after the is_user_logged_in check above
+        }
+      }
+      
       // display private message if admin privacy level and user is not admin
-      else if ($this->Options['wrswl_settings_privacy'] == 'admin' && !current_user_can('manage_options'))
-        $View = 'private_display';
+      else if ($settings['wrswl_settings_privacy'] == 'admin' && !current_user_can('manage_options'))
+        $view = 'private_display';
         
       // display private message if user level and no user logged in
-      else if ($this->Options['wrswl_settings_privacy'] == 'user' && !is_user_logged_in())
-        $View = 'private_display';
+      else if ($settings['wrswl_settings_privacy'] == 'user' && !is_user_logged_in())
+        $view = 'private_display';
         
       // display private message if author level and user is not author
-      else if ($this->Options['wrswl_settings_privacy'] == 'author' && !$this->CurrentUserIsAuthor)
-        $View = 'private_display';
+      else if ($settings['wrswl_settings_privacy'] == 'author' && get_the_author() != $current_user->display_name)
+        $view = 'private_display';
 
-        
 
-      if ($View == 'main')
-        $this->ShowMainView(false);
-      else if ($View == 'private_display')
+      if ($view == 'main')
+        $this->ShowMainView(false, $user);
+      else if ($view == 'private_display')
         $this->ShowPrivateView();
-      else if ($View == 'no_display')
-        $this->ShowNoDisplayView();
+      else if ($view == 'no_display')
+        $this->ShowNoDisplayView($no_display_message);
       else
       {
         /* translators: Error message displayed when an invalid view attribute is used */
@@ -677,8 +860,21 @@ if (! class_exists('wrsWalkingLogPlugin'))
     {
       global $wpdb;
 
+      $this->RefreshUserInfo();
+      
+      // get user id and verify nonce
+      if (isset($_REQUEST['action_id']))
+        $user_id = $_REQUEST['action_id'];
+      else
+        $user_id = 0;
+
+      check_ajax_referer('wrswl_nonce_' . $user_id, 'nonce', true);
+
+      
+      // look up user info and update permissions
+      $user = get_userdata($user_id);
+      $this->UpdateLogPermissions($user->user_login);
       $this->VerifyWritePermissions();
-      $this->VerifyNonce();
       
       $log_date = $_POST['log_date'];
       $elapsed_time = $_POST['elapsed_time'];
@@ -692,7 +888,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
       $this->VerifyInteger($type_id);
       $this->VerifyInteger($location_id);
       
-      $id = $this->InsertLogRow($log_date, $elapsed_time, $distance, $type_id, $location_id);
+      $id = $this->InsertLogRow($user_id, $log_date, $elapsed_time, $distance, $type_id, $location_id);
 
       // return ok, along with new ID      
       echo "OK:$id";
@@ -704,9 +900,22 @@ if (! class_exists('wrsWalkingLogPlugin'))
     {
       global $wpdb;
       
-      $this->VerifyWritePermissions();
-      $this->VerifyNonce();
+      $this->RefreshUserInfo();
       
+      // get user id and verify nonce
+      if (isset($_REQUEST['action_id']))
+        $user_id = $_REQUEST['action_id'];
+      else
+        $user_id = 0;
+        
+      check_ajax_referer('wrswl_nonce_' . $user_id, 'nonce', true);
+        
+
+      // look up user info and update permissions
+      $user = get_userdata($user_id);
+      $this->UpdateLogPermissions($user->user_login);
+      $this->VerifyWritePermissions();
+
       $id = $_POST['row_id'];
       $log_date = $_POST['log_date'];
       $elapsed_time = $_POST['elapsed_time'];
@@ -728,8 +937,9 @@ if (! class_exists('wrsWalkingLogPlugin'))
                             "    distance = %f, " .
                             "    type_id = %d, " .
                             "    location_id = %d " .
-                            "where log_id = %d; ",
-                            $log_date, $elapsed_time, $distance, $type_id, $location_id, $id);
+                            "where log_id = %d and " .
+                            "      wordpress_user_id = %d; ",
+                            $log_date, $elapsed_time, $distance, $type_id, $location_id, $id, $user_id);
                             
       $wpdb->query($sql);
 
@@ -737,28 +947,46 @@ if (! class_exists('wrsWalkingLogPlugin'))
       die();
     }
 
+    
+    function DeleteLogForID()
+    {
+      global $wpdb;
 
-    function WriteNonce()
-    {      
-      wp_nonce_field('wrswl_nonce', 'wrswl_nonce');
-    }   
+      $this->RefreshUserInfo();
+      
+      // get user id and verify nonce
+      if (isset($_REQUEST['action_id']))
+        $user_id = $_REQUEST['action_id'];
+      else
+        $user_id = 0;
+        
+      check_ajax_referer('wrswl_nonce_' . $user_id, 'nonce', true);
+        
+
+      // look up user info and update permissions
+      $user = get_userdata($user_id);
+      $this->UpdateLogPermissions($user->user_login);
+      $this->VerifyWritePermissions();
+      
+      $id = $_POST['row_id'];
+      $this->VerifyInteger($id);
+      
+      $sql = $wpdb->prepare("delete from $this->ExerciseLogTableName where log_id = %d and wordpress_user_id = %d", $id, $user_id);
+      $results = $wpdb->query($sql);
+      
+      echo 'OK';
+      die();
+    }
+
+    
 
 
     function VerifyWritePermissions()
     {
-      $this->RefreshUserInfo();
-      
       if (!$this->CurrentUserCanEditLog)
-      //if (!current_user_can('manage_options') && !$this->CurrentUserIsAuthor)
         die('Request Failed');
     }
 
-
-    function VerifyNonce()
-    {
-      if (!wp_verify_nonce($_REQUEST['nonce'], 'wrswl_nonce'))
-        die('Request failed');
-    }    
 
 
     function VerifyDate($value) 
@@ -786,26 +1014,6 @@ if (! class_exists('wrsWalkingLogPlugin'))
       if (intval($value) != $value) die('Request Failed');
     }    
     
-    
-    function DeleteLogForID()
-    {
-      global $wpdb;
-
-      $this->VerifyWritePermissions();
-      $this->VerifyNonce();
-
-      $id = $_POST['row_id'];
-
-      $this->VerifyInteger($id);
-
-      
-      $sql = $wpdb->prepare("delete from $this->ExerciseLogTableName where log_id = %d", $id);
-      $results = $wpdb->query($sql);
-      
-      echo 'OK';
-      die();
-    }
-
     
     function NumberFormat($value, $decimals = 0)
     {
@@ -844,8 +1052,18 @@ if (! class_exists('wrsWalkingLogPlugin'))
     {
       global $wpdb;
       
-      $this->VerifyNonce();
+      $this->RefreshUserInfo();
       
+
+      // get user id and verify nonce
+      if (isset($_REQUEST['action_id']))
+        $user_id = $_REQUEST['action_id'];
+      else
+        $user_id = 0;
+        
+      check_ajax_referer('wrswl_nonce_' . $user_id, 'nonce', true);
+      
+
       $date = $_GET['date'];
 
       $this->VerifyDate($date);
@@ -865,6 +1083,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
              "join $this->ExerciseLocationTableName l on l.location_id = e.location_id " .
              "where e.log_date >= '$date' " .
              "      and e.log_date <  date_add('$date', interval 1 month) " .
+             "      and e.wordpress_user_id = $user_id " .
                      
              "union " .
              
@@ -880,6 +1099,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
              "from $this->ExerciseLogTableName e " .
              "where e.log_date >= '$date' " .
              "      and e.log_date <  date_add('$date', interval 1 month) " .
+             "      and e.wordpress_user_id = $user_id " .
                      
              "order by log_order desc, log_id";
 
@@ -908,15 +1128,15 @@ if (! class_exists('wrsWalkingLogPlugin'))
       foreach ($results as $row)
       {
         $time = $row->elapsed_time;
-        if ($this->Options['wrswl_settings_time_format'] === 'minutes')
+        if ($this->Settings['wrswl_settings_time_format'] === 'minutes')
           $time = $this->NumberFormat($time, 2);
-        else if ($this->Options['wrswl_settings_time_format'] === 'hours')
+        else if ($this->Settings['wrswl_settings_time_format'] === 'hours')
           $time = $this->NumberFormat($time / 60.0, 2);
         else
           $time = $this->MinutesToHHMMSS($time);
           
         $distance = $row->distance;
-        if ($this->Options['wrswl_settings_distance_format'] !== 'miles')
+        if ($this->Settings['wrswl_settings_distance_format'] !== 'miles')
           $distance = $this->MilesToKilometers($distance);
         $distance = $this->NumberFormat($distance, 2);
           
@@ -949,7 +1169,9 @@ if (! class_exists('wrsWalkingLogPlugin'))
     {
       global $wpdb;
 
-      $sql = "select type_id, name from $this->ExerciseTypeTableName where visible = 1 order by type_id";
+      $sql = "select type_id, name from $this->ExerciseTypeTableName where " .
+             "(wordpress_user_id = $this->CurrentUserId or scope = $this->GlobalPermanentScope or scope = $this->GlobalScope) " .
+             "and visible = 1 order by type_id";
       $rows = $wpdb->get_results($sql);
 
       $result = '[';
@@ -972,7 +1194,9 @@ if (! class_exists('wrsWalkingLogPlugin'))
     {
       global $wpdb;
 
-      $sql = "select location_id, name from $this->ExerciseLocationTableName where visible = 1 order by location_id";
+      $sql = "select location_id, name from $this->ExerciseLocationTableName where " .
+             "(wordpress_user_id = $this->CurrentUserId or scope = $this->GlobalPermanentScope or scope = $this->GlobalScope) " .
+             "and visible = 1 order by location_id";
       $rows = $wpdb->get_results($sql);
 
       $result = '[';
@@ -997,7 +1221,8 @@ if (! class_exists('wrsWalkingLogPlugin'))
       
       $sql = "select coalesce(min(log_date), current_date()) as min_date, " .
              "       coalesce(max(log_date), current_date()) as max_date " .
-             "from $this->ExerciseLogTableName ";
+             "from $this->ExerciseLogTableName " .
+             "where wordpress_user_id = $this->CurrentUserId ";
       
       $results = $wpdb->get_results($sql);
       $row = $results[0];
@@ -1026,21 +1251,80 @@ if (! class_exists('wrsWalkingLogPlugin'))
         $date = strtotime(date_i18n("Y-m-d", $date) . " +1 months");
       }
       
-      
       echo '</select>' . "\n";
     }
 
-
-    function ShowMainView($IsAdminPage)
+    
+    function UpdateLogPermissions($user)
     {
-      $this->WriteNonce();
+      // only users with read capability can edit - seems odd, but we want to include subscribers
+      if (!current_user_can('read'))
+      {
+        $this->CurrentUserCanEditLog = false;
+        return;
+      }
+    
+    
+      // assume we can edit 
+      $this->CurrentUserCanEditLog = true;
       
+      
+      // the current user can always edit his log if on an admin page
+      if (is_admin()) return;
+
+      // if there is no user specified in the shortcode then we're always diplaying the
+      // current user's log, and that user can edit his own log
+      if ($user == '') return;
+      
+      // otherwise a specific user's log is being displayed, so we need to 
+      // restrict editing rights to the user who owns the log
+      if ($this->CurrentUserLogin == $user) return;
+
+
+      // no editing allowed for any other situation      
+      $this->CurrentUserCanEditLog = false;
+    }
+    
+    
+    function ShowMainView($is_admin_page, $username)
+    {
+      global $wpdb;
+      
+      // make sure the user has the initial default values if this is the first time
+      $this->CheckDefaults();
+      
+      
+      // get user id, either current user, or specific user
+      if ($username != '')
+      {
+        $user = new WP_user($username);
+        $user_id = $user->ID;
+      }
+      else
+      {
+        $user_id = $this->CurrentUserId;
+      }
+
+      // this should not happen
+      if (!isset($user_id)) wp_die('Failure (0)');
+      if ($user_id == 0) wp_die('Failure (1)');
+      
+
+      // create nonce and write out nonce field      
+      $nonce = wp_create_nonce('wrswl_nonce_' . $user_id);
+      $nonce_field = '<input type="hidden" id="wrswl_nonce" name="wrswl_nonce" value="' . $nonce . '" />';
+      echo $nonce_field;
+      
+      // write out user id field - ajax requests must pass this
+      echo '<input type="hidden" id="wrswl_id" name="wrswl_id" value="' . $user_id . '" />';
+      
+
       // uncomment this to allow the javascript code to show trace messages during ajax calls
       // echo "\n" . '<div id="trace_message"></div>' . "\n";
       
       $this->WriteMonthSelect();
-      $this->RefreshUserInfo();
-      
+      $this->UpdateLogPermissions($username);
+
       // add top edit button
       if ($this->CurrentUserCanEditLog)
       {
@@ -1060,7 +1344,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
         
         $admin_url = admin_url('admin.php?page=wrs_walking_log_menu');
         
-        if (!$IsAdminPage)
+        if (!$is_admin_page)
         {
           echo '  <div style="float:right"><a id="wrswl-settings-link" href="' . $admin_url . '">Settings</a></div>';
         }
@@ -1080,8 +1364,10 @@ if (! class_exists('wrsWalkingLogPlugin'))
       // validate action
       if ($action != 'add_type' && $action != 'add_location' &&
           $action != 'show' && $action != 'hide' && $action != 'delete' &&
-          $action != 'test_activation') wp_die('Request failed');
-     
+          $action != 'test_activation' && $action != 'global' && $action != 'user')
+        wp_die('Request failed');
+
+        
       switch ($action)
       {
         case 'delete':
@@ -1089,16 +1375,42 @@ if (! class_exists('wrsWalkingLogPlugin'))
           {
             $type_id = $_REQUEST['type_id'];
             $this->VerifyInteger($type_id);
-            $this->DeleteExerciseType($type_id);
+            $this->DeleteExerciseType($this->CurrentUserId, $type_id);
           }
           else if (isset($_REQUEST['location_id']))
           {
             $location_id = $_REQUEST['location_id'];
             $this->VerifyInteger($location_id);
-            $this->DeleteExerciseLocation($location_id);
+            $this->DeleteExerciseLocation($this->CurrentUserId, $location_id);
           }
           
           break;
+          
+        case 'global':
+        case 'user':
+          // only admin users can do this
+          if (!current_user_can('manage_options')) wp_die('Request failed.');
+          
+          if ($action == 'global')
+            $new_scope = $this->GlobalScope;
+          else 
+            $new_scope = $this->UserScope;
+          
+          if (isset($_REQUEST['type_id']))
+          {
+            $type_id = $_REQUEST['type_id'];
+            $this->VerifyInteger($type_id);
+            $this->SetExerciseTypeScope($this->CurrentUserId, $type_id, $new_scope);
+          }
+          else if (isset($_REQUEST['location_id']))
+          {
+            $location_id = $_REQUEST['location_id'];
+            $this->VerifyInteger($location_id);
+            $this->SetExerciseLocationScope($this->CurrentUserId, $location_id, $new_scope);
+          }
+          
+          break;
+          
       
         case 'hide':
         case 'show':
@@ -1106,13 +1418,13 @@ if (! class_exists('wrsWalkingLogPlugin'))
           {
             $type_id = $_REQUEST['type_id'];
             $this->VerifyInteger($type_id);
-            $this->ToggleExerciseTypeVisibility($type_id);
+            $this->ToggleExerciseTypeVisibility($this->CurrentUserId, $type_id);
           }
           else if (isset($_REQUEST['location_id']))
           {
             $location_id = $_REQUEST['location_id'];
             $this->VerifyInteger($location_id);
-            $this->ToggleExerciseLocationVisibility($location_id);
+            $this->ToggleExerciseLocationVisibility($this->CurrentUserId, $location_id);
           }
             
           break;
@@ -1121,7 +1433,7 @@ if (! class_exists('wrsWalkingLogPlugin'))
           if (isset($_REQUEST['add_type_edit']))
           {
             $value = htmlentities(stripslashes($_REQUEST['add_type_edit']));
-            $this->InsertExerciseTypeRow($value);
+            $this->InsertExerciseTypeRow($this->CurrentUserId, $this->UserScope, $value);
           }
           break;
           
@@ -1129,15 +1441,15 @@ if (! class_exists('wrsWalkingLogPlugin'))
           if (isset($_REQUEST['add_location_edit']))
           {
             $value = htmlentities(stripslashes($_REQUEST['add_location_edit']));
-            $this->InsertExerciseLocationRow($value);
+            $this->InsertExerciseLocationRow($this->CurrentUserId, $this->UserScope, $value);
           }
           break;
           
-        // case 'test_activation':
-          // $this->IsMultiSite = true;
-          // $this->IsNetworkWide = true;
-          // $this->ActivatePlugin();
-          // break;
+        case 'test_activation':
+          $this->IsMultiSite = false;
+          $this->IsNetworkWide = false;
+          $this->ActivatePlugin();
+          break;
           
       }
     }
