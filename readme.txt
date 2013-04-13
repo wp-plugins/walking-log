@@ -3,8 +3,9 @@ Contributors: CrappyCodingGuy
 Donate link: 
 Tags: exercise, walking, hiking
 Requires at least: 3.0
-Tested up to: 3.3.1
-Stable tag: 1.2
+Tested up to: 3.5.1
+Stable tag: 1.3
+Text Domain: wrs-walking-log
 
 Exercise log for tracking time and distance based exercise, such as walking or running.
 
@@ -14,7 +15,8 @@ Walking Log is a WordPress plugin for tracking time and distance based exercise,
 The plugin allows you to track date, exercise time in minutes, distance, type (e.g. walking), and location.
 
 Each blog user has his or her own log which can be viewed and edited within the admin pages, or it can be
-placed in a post or page with various viewing permissions and editing permissions by using short codes.
+placed in a post or page with various viewing and editing permissions by using short codes. Additional
+short codes allow the display of rankings reports and user or overall statistics.
 
 == Installation ==
 
@@ -26,7 +28,7 @@ placed in a post or page with various viewing permissions and editing permission
    the plugin can load itself only on pages where it's needed.
 1. Add new exercise types and locations using the Walking Log admin pages.
 1. If you're upgrading a previous installation you will be asked to assign existing log data to a blog user.
-1. Additional instructions can be found in the plugin's admin options page.
+1. Additional instructions can be found in the plugin's admin help page.
 
 
 == Frequently Asked Questions ==
@@ -43,6 +45,13 @@ operation on a large network. This could also be a dangerous operation since the
 accidentally deleting a lot of data.
 
 == Changelog ==
+
+= 1.3 =
+* Added new short codes for ranking and statistics.
+* Added help admin page with improved instructions for short code usage.
+* Added admin page to display user stats.
+* Added global default settings that control various parameters when no user is signed in.
+* Fixed bug with short code handling that prevented placing html before the shortcode.
 
 = 1.2 =
 * The logs are now tracked by blog user, rather than having a single log per blog.
@@ -67,6 +76,9 @@ accidentally deleting a lot of data.
 
 == Upgrade Notice ==
 
+= 1.3 =
+New short codes for displaying user ranking and statistics.
+
 = 1.2 =
 Logs are now user based rather than a single global log, optimizations, security enhancements.
 
@@ -83,7 +95,7 @@ Initial version.
 
 == License ==
 
-Copyright (c) 2012 Dave Carlile (email: david@willowridgesoftware.com)
+Copyright (c) 2012 - 2013 Dave Carlile (email: david@willowridgesoftware.com)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

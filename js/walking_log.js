@@ -8,6 +8,18 @@ var wrsWalkingLog =
     this.selectedDate = '';
 
 
+    // remove elements that are no longer needed since we have javascript support
+    jQuery('#wrswl-select-date').remove();
+    jQuery('#wrswl-monthly-data').empty();
+
+    // remove edit and delete links from inline edit/delete hrefs    
+    jQuery('.wrswl-edit-inline').removeAttr('href');
+    jQuery('.wrswl-delete-inline').removeAttr('href');
+    
+    // make edit buttons visible
+    jQuery('#wrswl-edit-log-top').show();
+    jQuery('#wrswl-edit-log-bottom').show();
+    
     // link up events
     var thisInstance = this;
     jQuery('#wrswl-month-select').bind('change', function(event) { thisInstance.monthChanged(event); });
@@ -25,17 +37,20 @@ var wrsWalkingLog =
     jQuery('#trace_message').append(message + '<br />');
   },
   
+  
   extractId: function(id)
   {
     var parts = id.split('-');
     return parseInt(parts[parts.length - 1], 10);
   },
+  
 
   // from: http://snippets.dzone.com/posts/show/2099
   daysInMonth: function(year, month)
   {
     return parseInt(32 - new Date(year, month, 32).getDate(), 10);
   },
+  
 
   getCell: function(item, cellIndex)
   {

@@ -1,6 +1,6 @@
 /*
   
-Copyright (c) 2012 Dave Carlile (email: david@willowridgesoftware.com)
+Copyright (c) 2012 - 2013 Dave Carlile (email: david@willowridgesoftware.com)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,13 +22,19 @@ THE SOFTWARE.
 
 */
 
+.wrswl-help-list
+{
+  list-style-type: disc;
+  padding-left: 20px;
+}
+
 #wrswl-monthly-data
 {
   margin: 10px;
   margin-bottom: 20px;
 }
 
-#wrswl-edit-log-top, #wrswl-edit-log-bottom, #wrswl-add-log-top, #wrswl-add-log-bottom
+#wrswl-edit-log-top, #wrswl-edit-log-bottom, #wrswl-add-log-top, #wrswl-add-log-bottom, #wrswl-select-date, #wrswl-select-report-date
 {
   padding:3px;
   margin:3px;
@@ -41,6 +47,7 @@ THE SOFTWARE.
   table-layout: fixed;
   font-size: small;
   color: #303030;
+  min-width: 400px;
 }
  
 #wrswl-monthly-data-table th
@@ -51,6 +58,55 @@ THE SOFTWARE.
 }
 
 #wrswl-monthly-data-table td
+{
+  border: 1px solid #a0a0a0;
+  padding: 6px;
+  vertical-align: top;
+}
+
+#wrswl-stats-table 
+{
+  border: 1px solid #a0a0a0;
+  border-collapse:collapse;
+  table-layout: fixed;
+  font-size: small;
+  color: #303030;
+  min-width: 400px;
+}
+ 
+#wrswl-stats-table th
+{
+  border: 1px solid #a0a0a0;
+  padding: 0.35em;
+  color: #303030;
+}
+
+#wrswl-stats-table td
+{
+  border: 1px solid #a0a0a0;
+  padding: 6px;
+  vertical-align: top;
+}
+
+
+#wrswl-rank-table 
+{
+  border: 1px solid #a0a0a0;
+  border-collapse:collapse;
+  table-layout: fixed;
+  font-size: small;
+  color: #303030;
+  min-width: 400px;
+}
+ 
+#wrswl-rank-table th
+{
+  border: 1px solid #a0a0a0;
+  padding: 0.35em;
+  color: #303030;
+}
+
+#wrswl-rank-table td
 {
   border: 1px solid #a0a0a0;
   padding: 6px;
@@ -283,4 +339,20 @@ select.wrswl-location-edit
 .half-width
 {
   width: 50%;
+}
+
+
+.wrswl-log-view
+{
+  margin-bottom: 80px;
+}
+
+.wrswl-stats-view
+{
+  margin-bottom: 40px;
+}
+
+.wrswl-rank-view
+{
+  margin-bottom: 40px;
 }
