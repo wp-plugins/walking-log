@@ -5,7 +5,6 @@ Tags: exercise, walking, hiking
 Requires at least: 3.0
 Tested up to: 3.5.1
 Stable tag: 1.3
-Text Domain: wrs-walking-log
 
 Exercise log for tracking time and distance based exercise, such as walking or running.
 
